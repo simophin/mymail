@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT url, credentials, name FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "url",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "credentials",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4a022c0ba83c3619f67d21a7d891dd1ef6834d531cb5f6d10b917235402f6f4b"
+}

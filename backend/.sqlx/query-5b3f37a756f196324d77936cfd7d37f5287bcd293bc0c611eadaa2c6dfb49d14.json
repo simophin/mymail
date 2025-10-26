@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT mailboxes_sync_state FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "mailboxes_sync_state",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "5b3f37a756f196324d77936cfd7d37f5287bcd293bc0c611eadaa2c6dfb49d14"
+}

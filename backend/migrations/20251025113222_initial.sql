@@ -29,6 +29,7 @@ CREATE TABLE mailboxes (
     unread_threads INTEGER NOT NULL,
     my_rights TEXT,
     parent_id TEXT,
+    email_sync_state TEXT DEFAULT NULL,
     PRIMARY KEY (account_id, id)
 );
 CREATE INDEX idx_mailboxes_account_id ON mailboxes(account_id);
@@ -44,6 +45,7 @@ CREATE TABLE emails(
     reply_to TEXT,
     date_sent TIMESTAMP,
     date_received TIMESTAMP,
+    downloaded BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (account_id, id)
 );
 

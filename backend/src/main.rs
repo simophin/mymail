@@ -2,6 +2,7 @@ use crate::jmap_account::AccountRepositoryExt;
 use futures::future::try_join_all;
 
 mod jmap_account;
+mod jmap_repo;
 mod jmap_sync;
 mod repo;
 

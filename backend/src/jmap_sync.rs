@@ -1,116 +1,19 @@
 use crate::jmap_account::{AccountId, AccountRepositoryExt, Credentials};
+use crate::jmap_repo::JmapRepositoryExt;
 use crate::repo::Repository;
 use anyhow::Context;
 use futures::StreamExt;
-use futures::future::{Either, join_all, select};
+use futures::future::{Either, select};
 use jmap_client::client::Client;
 use jmap_client::client_ws::WebSocketMessage;
-use jmap_client::core::changes::{ChangesObject, ChangesResponse};
 use jmap_client::core::request::Request;
-use jmap_client::core::response::{MailboxChangesResponse, TaggedMethodResponse};
-use jmap_client::mailbox::Mailbox;
-use jmap_client::{DataType, PushObject, mailbox};
-use sqlx::query;
+use jmap_client::core::response::TaggedMethodResponse;
+use jmap_client::{DataType, PushObject};
 use std::collections::HashMap;
 use std::pin::pin;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::try_join;
 use url::Url;
-
-trait JmapRepositoryExt {
-    async fn get_mailboxes_sync_state(
-        &self,
-        account_id: AccountId,
-    ) -> anyhow::Result<Option<String>>;
-
-    async fn update_mailboxes(
-        &self,
-        account_id: AccountId,
-        new_state: &str,
-        updated: Vec<Mailbox>,
-        deleted: Vec<String>,
-    ) -> anyhow::Result<()>;
-}
-
-impl JmapRepositoryExt for Repository {
-    async fn get_mailboxes_sync_state(
-        &self,
-        account_id: AccountId,
-    ) -> anyhow::Result<Option<String>> {
-        Ok(query!(
-            "SELECT mailboxes_sync_state FROM accounts WHERE id = ?",
-            account_id
-        )
-        .fetch_optional(self.pool())
-        .await
-        .context("Error querying mailboxes sync state")?
-        .context("Account not found")?
-        .mailboxes_sync_state)
-    }
-
-    async fn update_mailboxes(
-        &self,
-        account_id: AccountId,
-        new_state: &str,
-        updated: Vec<Mailbox>,
-        deleted: Vec<String>,
-    ) -> anyhow::Result<()> {
-        let mut tx = self.pool().begin().await?;
-
-        for updated in updated {
-            let id = updated.id();
-            let name = updated.name();
-            let sort_order = updated.sort_order() as i64;
-            let total_emails = updated.total_emails() as i64;
-            let unread_emails = updated.unread_emails() as i64;
-            let total_threads = updated.total_threads() as i64;
-            let unread_threads = updated.unread_threads() as i64;
-            let parent_id = updated.parent_id();
-            let role = serde_json::to_string(&updated.role()).ok();
-            let my_rights = serde_json::to_string(&updated.my_rights()).ok();
-
-            sqlx::query!(
-                "INSERT OR REPLACE INTO mailboxes
-                    (id, account_id, name, role, sort_order, total_emails, unread_emails, total_threads, unread_threads, my_rights, parent_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                id,
-                account_id,
-                name,
-                role,
-                sort_order,
-                total_emails,
-                unread_emails,
-                total_threads,
-                unread_threads,
-                my_rights,
-                parent_id,
-            ).execute(&mut *tx).await.context("Error updating mailbox")?;
-        }
-
-        for deleted_id in deleted {
-            sqlx::query!(
-                "DELETE FROM mailboxes WHERE id = ? AND account_id = ?",
-                deleted_id,
-                account_id
-            )
-            .execute(&mut *tx)
-            .await
-            .context("Error deleting mailbox")?;
-        }
-
-        sqlx::query!(
-            "UPDATE accounts SET mailboxes_sync_state = ? WHERE id = ?",
-            new_state,
-            account_id
-        )
-        .execute(&mut *tx)
-        .await
-        .context("Error updating mailboxes sync state")?;
-
-        tx.commit().await?;
-        Ok(())
-    }
-}
 
 #[derive(Debug)]
 enum JmapRequest {
@@ -122,25 +25,31 @@ enum JmapRequest {
 impl JmapRequest {
     fn to_request(self, client: &Client) -> Request<'_> {
         match self {
-            JmapRequest::MailboxChanges { since_state, .. } => {
+            Self::MailboxChanges { since_state, .. } => {
                 let mut req = client.build();
                 req.changes_mailbox(since_state).max_changes(100);
                 req
             }
 
-            JmapRequest::QueryMailboxes => {
+            Self::QueryMailboxes => {
                 let mut req = client.build();
                 req.query_mailbox().limit(100);
                 req
             }
 
-            JmapRequest::GetMailboxByIds(ids) => {
+            Self::GetMailboxByIds(ids) => {
                 let mut req = client.build();
                 req.get_mailbox().ids(ids);
                 req
             }
         }
     }
+}
+
+type JmapRequestCallback = oneshot::Sender<Vec<TaggedMethodResponse>>;
+
+pub enum SyncCommand {
+    SubscribeToMailbox { mailbox_id: String },
 }
 
 pub async fn run_jmap_sync(repo: &Repository, account_id: AccountId) -> anyhow::Result<()> {
@@ -177,9 +86,9 @@ pub async fn run_jmap_sync(repo: &Repository, account_id: AccountId) -> anyhow::
         .context("Failed to enable push via ws")?;
 
     let (pending_requests, mut pending_requests_rx) =
-        mpsc::channel::<(JmapRequest, oneshot::Sender<Vec<TaggedMethodResponse>>)>(10);
+        mpsc::channel::<(JmapRequest, JmapRequestCallback)>(10);
 
-    let (mailboxes_changed_tx, mut mailboxes_changed) = mpsc::channel::<()>(10);
+    let (mailboxes_changed_tx, mailboxes_changed) = broadcast::channel::<String>(10);
 
     let run_ws_stream = async {
         let mut requests: HashMap<String, oneshot::Sender<Vec<TaggedMethodResponse>>> =
@@ -198,7 +107,13 @@ pub async fn run_jmap_sync(repo: &Repository, account_id: AccountId) -> anyhow::
                     .any(|(_, r)| r.contains_key(&DataType::Mailbox)) =>
                 {
                     tracing::info!("Received push notification: {changed:?} ");
-                    let _ = mailboxes_changed_tx.send(()).await;
+                    for (_, id) in changed
+                        .into_iter()
+                        .flat_map(|(_, r)| r.into_iter())
+                        .filter(|(t, id)| *t == DataType::Mailbox)
+                    {
+                        let _ = mailboxes_changed_tx.send(id);
+                    }
                 }
 
                 Either::Left((Some(Ok(WebSocketMessage::PushNotification(obj))), _)) => {
@@ -245,80 +160,90 @@ pub async fn run_jmap_sync(repo: &Repository, account_id: AccountId) -> anyhow::
         Ok(())
     };
 
-    let send_ws_request = async |req: JmapRequest| -> anyhow::Result<TaggedMethodResponse> {
-        let (callback, resp_rx) = oneshot::channel();
+    let sync_account = sync_account(repo, account_id, &pending_requests, mailboxes_changed);
 
-        pending_requests
-            .send((req, callback))
-            .await
-            .context("Error sending WS request")?;
+    try_join!(run_ws_stream, sync_account)?;
+    Ok(())
+}
 
-        Ok(resp_rx
-            .await
-            .context("Error receiving WS response")?
-            .into_iter()
-            .next()
-            .context("No response received")?)
-    };
+async fn send_ws_request(
+    request_sender: &mpsc::Sender<(JmapRequest, JmapRequestCallback)>,
+    req: JmapRequest,
+) -> anyhow::Result<TaggedMethodResponse> {
+    let (callback, resp_rx) = oneshot::channel();
 
-    let sync_mailboxes = async {
-        loop {
-            let (new_state, updated, deleted) =
-                match repo.get_mailboxes_sync_state(account_id).await? {
-                    Some(since_state) if !since_state.is_empty() => {
-                        let mut resp = send_ws_request(JmapRequest::MailboxChanges { since_state })
-                            .await?
-                            .unwrap_changes_mailbox()
-                            .context("Expecting mailbox changes response")?;
+    request_sender
+        .send((req, callback))
+        .await
+        .context("Error sending WS request")?;
 
-                        let mut updated = resp.take_created();
-                        updated.extend(resp.take_updated());
-                        (resp.take_new_state(), updated, resp.take_destroyed())
-                    }
+    Ok(resp_rx
+        .await
+        .context("Error receiving WS response")?
+        .into_iter()
+        .next()
+        .context("No response received")?)
+}
 
-                    _ => {
-                        let mut resp = send_ws_request(JmapRequest::QueryMailboxes)
-                            .await?
-                            .unwrap_query_mailbox()
-                            .context("Expecting mailbox query response")?;
+async fn sync_account(
+    repo: &Repository,
+    account_id: AccountId,
+    request_sender: &mpsc::Sender<(JmapRequest, JmapRequestCallback)>,
+    mut mailbox_changed: broadcast::Receiver<String>,
+) -> anyhow::Result<()> {
+    loop {
+        let (new_state, updated, deleted) = match repo.get_mailboxes_sync_state(account_id).await? {
+            Some(since_state) if !since_state.is_empty() => {
+                let mut resp =
+                    send_ws_request(request_sender, JmapRequest::MailboxChanges { since_state })
+                        .await?
+                        .unwrap_changes_mailbox()
+                        .context("Expecting mailbox changes response")?;
 
-                        tracing::info!("Got mailbox query: {resp:?}");
-                        (resp.take_query_state(), resp.take_ids(), vec![])
-                    }
-                };
-
-            tracing::info!(
-                "Updating {} mailboxes, deleted {}",
-                updated.len(),
-                deleted.len()
-            );
-
-            // Fetch all updated mailboxes details
-            let updated = if updated.is_empty() {
-                vec![]
-            } else {
-                send_ws_request(JmapRequest::GetMailboxByIds(updated))
-                    .await
-                    .context("Error getting mailboxes")?
-                    .unwrap_get_mailbox()
-                    .context("Expecting mailbox query response")?
-                    .take_list()
-            };
-
-            repo.update_mailboxes(account_id, &new_state, updated, deleted)
-                .await
-                .context("Failed to update mailboxes")?;
-
-            if mailboxes_changed.recv().await.is_none() {
-                break;
+                let mut updated = resp.take_created();
+                updated.extend(resp.take_updated());
+                (resp.take_new_state(), updated, resp.take_destroyed())
             }
 
-            tracing::info!("Mailboxes changed")
+            _ => {
+                let mut resp = send_ws_request(request_sender, JmapRequest::QueryMailboxes)
+                    .await?
+                    .unwrap_query_mailbox()
+                    .context("Expecting mailbox query response")?;
+
+                tracing::info!("Got mailbox query: {resp:?}");
+                (resp.take_query_state(), resp.take_ids(), vec![])
+            }
+        };
+
+        tracing::info!(
+            "Updating {} mailboxes, deleted {}",
+            updated.len(),
+            deleted.len()
+        );
+
+        // Fetch all updated mailboxes details
+        let updated = if updated.is_empty() {
+            vec![]
+        } else {
+            send_ws_request(request_sender, JmapRequest::GetMailboxByIds(updated))
+                .await
+                .context("Error getting mailboxes")?
+                .unwrap_get_mailbox()
+                .context("Expecting mailbox query response")?
+                .take_list()
+        };
+
+        repo.update_mailboxes(account_id, &new_state, updated, deleted)
+            .await
+            .context("Failed to update mailboxes")?;
+
+        if mailbox_changed.recv().await.is_err() {
+            break;
         }
 
-        Ok(())
-    };
+        tracing::info!("Mailboxes changed")
+    }
 
-    try_join!(run_ws_stream, sync_mailboxes)?;
     Ok(())
 }
