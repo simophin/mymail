@@ -52,3 +52,27 @@ pub async fn run_jmap_sync() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+async fn sync_mailbox(client: &Client, id: &str) -> anyhow::Result<()> {
+    let mut state: Option<String> = None;
+
+    loop {
+        if let Some(s) = std::mem::take(&mut state) {
+            let resp = client
+                .mailbox_changes(s, 100)
+                .await
+                .context("Failed to get mailbox changes")?;
+            state.replace(resp.new_state().to_string());
+        }
+    }
+
+    let mailbox = client
+        .mailbox_get(id, Option::<[mailbox::Property; 0]>::None)
+        .await
+        .context("Failed to get mailbox")?
+        .context("Mailbox not found")?;
+
+    tracing::info!("Mailbox: {mailbox:?}");
+
+    Ok(())
+}
