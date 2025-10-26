@@ -2,7 +2,8 @@ CREATE TABLE accounts (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     url TEXT NOT NULL,
     credentials TEXT NOT NULL,
-    name TEXT NOT NULL
+    name TEXT NOT NULL,
+    mailboxes_sync_state TEXT
 );
 
 CREATE TABLE identities (
@@ -22,6 +23,11 @@ CREATE TABLE mailboxes (
     name TEXT NOT NULL,
     role TEXT,
     sort_order INTEGER NOT NULL,
+    total_emails INTEGER NOT NULL,
+    unread_emails INTEGER NOT NULL,
+    total_threads INTEGER NOT NULL,
+    unread_threads INTEGER NOT NULL,
+    my_rights TEXT,
     parent_id TEXT,
     PRIMARY KEY (account_id, id)
 );

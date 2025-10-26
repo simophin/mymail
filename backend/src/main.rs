@@ -1,9 +1,9 @@
+use crate::jmap_account::AccountRepositoryExt;
+use futures::future::try_join_all;
+
+mod jmap_account;
 mod jmap_sync;
-
-use sqlx::migrate::Migrator;
-use sqlx::sqlite::SqliteConnectOptions;
-
-static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+mod repo;
 
 #[tokio::main]
 async fn main() {
@@ -14,18 +14,40 @@ async fn main() {
 
     tracing::info!("Using database {database_file}");
 
-    let pool = sqlx::SqlitePool::connect_with(
-        SqliteConnectOptions::new()
-            .create_if_missing(true)
-            .filename(database_file),
-    )
-    .await
-    .expect("Failed to connect to the database");
-
-    MIGRATOR
-        .run(&pool)
+    let repo = repo::Repository::new(&database_file)
         .await
-        .expect("Failed to run database migrations");
+        .expect("Failed to initialize DB repository");
 
-    jmap_sync::run_jmap_sync().await.unwrap();
+    let accounts = match repo.list_accounts().await.expect("Failed to list accounts") {
+        accounts if accounts.is_empty() => {
+            tracing::info!("No accounts found in the database.");
+            let server_url = std::env::var("JMAP_SERVER_URL")
+                .expect("Missing JMAP_SERVER_URL environment variable");
+            let username =
+                std::env::var("JMAP_USERNAME").expect("Missing JMAP_USERNAME environment variable");
+            let password =
+                std::env::var("JMAP_PASSWORD").expect("Missing JMAP_PASSWORD environment variable");
+
+            let account = jmap_account::Account {
+                server_url: server_url.clone(),
+                credentials: jmap_account::Credentials::Basic { username, password },
+                name: String::from("default"),
+            };
+            repo.add_account(&account)
+                .await
+                .expect("Failed to add account");
+
+            repo.list_accounts().await.expect("Failed to list accounts")
+        }
+
+        accounts => accounts,
+    };
+
+    let sync_tasks = accounts
+        .into_iter()
+        .map(|(account_id, _)| jmap_sync::run_jmap_sync(&repo, account_id));
+
+    try_join_all(sync_tasks)
+        .await
+        .expect("Failed to sync accounts");
 }

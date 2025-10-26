@@ -10,7 +10,11 @@ clap = { version = "4.5.50", features = ["derive"] }
 dotenvy = "0.15.7"
 futures = "0.3.31"
 jmap-client = { version = "0.4.0", features = ["websockets"] }
+parking_lot = "0.12.5"
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite"] }
 tokio = { version = "1.48.0", default-features = false, features = ["net", "signal", "rt", "rt-multi-thread", "macros", "io-util"] }
 tracing = { version = "0.1.41", features = ["async-await"] }
 tracing-subscriber = "0.3.20"
+url = "2.5.7"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"

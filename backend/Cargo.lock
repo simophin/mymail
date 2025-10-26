@@ -192,10 +192,14 @@ dependencies = [
  "dotenvy",
  "futures",
  "jmap-client",
+ "parking_lot",
+ "serde",
+ "serde_json",
  "sqlx",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
