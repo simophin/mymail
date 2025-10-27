@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM emails WHERE account_id = ?1 AND id = ?2 AND id NOT IN (\n                    SELECT DISTINCT me.email_id FROM mailbox_emails me WHERE me.account_id = ?1\n                )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "c9b8576969184bdb66bceb61c417a059fde10c60cb0d42207ac213500b346fda"
+}

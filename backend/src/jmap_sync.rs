@@ -6,9 +6,10 @@ use futures::StreamExt;
 use futures::future::{Either, select};
 use jmap_client::client::Client;
 use jmap_client::client_ws::WebSocketMessage;
+use jmap_client::core::query::{Comparator, Filter};
 use jmap_client::core::request::Request;
 use jmap_client::core::response::TaggedMethodResponse;
-use jmap_client::{DataType, PushObject};
+use jmap_client::{DataType, PushObject, email};
 use std::collections::HashMap;
 use std::pin::pin;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -17,9 +18,20 @@ use url::Url;
 
 #[derive(Debug)]
 enum JmapRequest {
-    MailboxChanges { since_state: String },
+    MailboxChanges {
+        since_state: String,
+    },
     QueryMailboxes,
     GetMailboxByIds(Vec<String>),
+    QueryEmail {
+        anchor_id: Option<String>,
+        sort: Vec<Comparator<email::query::Comparator>>,
+        filters: Vec<Filter<email::query::Filter>>,
+        limit: usize,
+    },
+    EmailChanges {
+        since_state: String,
+    },
 }
 
 impl JmapRequest {
@@ -40,6 +52,32 @@ impl JmapRequest {
             Self::GetMailboxByIds(ids) => {
                 let mut req = client.build();
                 req.get_mailbox().ids(ids);
+                req
+            }
+
+            Self::QueryEmail {
+                anchor_id,
+                sort,
+                filters,
+                limit,
+            } => {
+                let mut req = client.build();
+                let query_email = filters
+                    .into_iter()
+                    .fold(req.query_email(), |r, f| r.filter(f))
+                    .limit(limit)
+                    .sort(sort);
+
+                if let Some(anchor_id) = anchor_id {
+                    query_email.anchor(anchor_id);
+                }
+
+                req
+            }
+
+            Self::EmailChanges { since_state } => {
+                let mut req = client.build();
+                req.changes_email(since_state);
                 req
             }
         }
@@ -110,7 +148,7 @@ pub async fn run_jmap_sync(repo: &Repository, account_id: AccountId) -> anyhow::
                     for (_, id) in changed
                         .into_iter()
                         .flat_map(|(_, r)| r.into_iter())
-                        .filter(|(t, id)| *t == DataType::Mailbox)
+                        .filter(|(t, _)| *t == DataType::Mailbox)
                     {
                         let _ = mailboxes_changed_tx.send(id);
                     }
@@ -246,4 +284,45 @@ async fn sync_account(
     }
 
     Ok(())
+}
+
+async fn async_mailbox(
+    repo: &Repository,
+    account_id: AccountId,
+    request_sender: &mpsc::Sender<(JmapRequest, JmapRequestCallback)>,
+    mailbox_id: &str,
+) -> anyhow::Result<()> {
+    loop {
+        match repo
+            .get_mailbox_email_sync_state(account_id, mailbox_id)
+            .await?
+        {
+            Some(since_state) if !since_state.is_empty() => {
+                let mut resp = send_ws_request(
+                    request_sender,
+                    JmapRequest::EmailChanges {
+                        mailbox_id: mailbox_id.to_string(),
+                        since_state,
+                    },
+                )
+                .await
+                .context("Error sending WS email changes request")?
+                .unwrap_changes_email()
+                .context("Expecting email changes response")?;
+            }
+
+            _ => {
+                let resp = send_ws_request(
+                    request_sender,
+                    JmapRequest::QueryEmail {
+                        mailbox_id: mailbox_id.to_string(),
+                    },
+                )
+                .await
+                .context("Error sending WS query email request")?
+                .unwrap_query_email()
+                .context("Expecting email query response")?;
+            }
+        }
+    }
 }

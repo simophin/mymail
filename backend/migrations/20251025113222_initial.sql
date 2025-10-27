@@ -50,13 +50,14 @@ CREATE TABLE emails(
 );
 
 CREATE TABLE blobs(
-    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    email_id TEXT NOT NULL REFERENCES emails(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL,
+    email_id TEXT NOT NULL,
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     blob_id TEXT, -- The ID on the server
     mime_type TEXT,
     name TEXT,
-    data BLOB NOT NULL
+    data BLOB NOT NULL,
+    FOREIGN KEY (account_id, email_id) REFERENCES emails(account_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE mailbox_emails (
