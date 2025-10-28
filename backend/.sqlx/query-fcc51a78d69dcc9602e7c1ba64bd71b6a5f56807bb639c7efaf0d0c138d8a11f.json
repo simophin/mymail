@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id FROM emails\n             WHERE account_id = ? AND id IN (SELECT value FROM json_each(?)) AND jmap_data IS NULL\n             ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fcc51a78d69dcc9602e7c1ba64bd71b6a5f56807bb639c7efaf0d0c138d8a11f"
+}

@@ -1,6 +1,7 @@
 use crate::jmap_account::AccountId;
 use crate::repo::Repository;
 use anyhow::Context;
+use jmap_client::email::Email;
 use jmap_client::mailbox::Mailbox;
 use std::collections::HashSet;
 
@@ -23,6 +24,14 @@ pub trait JmapRepositoryExt {
         account_id: AccountId,
         mail_ids: &[String],
     ) -> anyhow::Result<HashSet<String>>;
+
+    async fn delete_emails(
+        &self,
+        account_id: AccountId,
+        email_ids: &[String],
+    ) -> anyhow::Result<()>;
+
+    async fn update_emails(&self, account_id: AccountId, emails: &[Email]) -> anyhow::Result<()>;
 }
 
 impl JmapRepositoryExt for Repository {
@@ -122,7 +131,7 @@ impl JmapRepositoryExt for Repository {
         let mail_ids = serde_json::to_string(mail_ids)?;
         let rows = sqlx::query!(
             "SELECT id FROM emails
-             WHERE account_id = ? AND id IN (SELECT value FROM json_each(?)) AND downloaded
+             WHERE account_id = ? AND id IN (SELECT value FROM json_each(?)) AND jmap_data IS NULL
              ",
             account_id,
             mail_ids,
@@ -132,5 +141,48 @@ impl JmapRepositoryExt for Repository {
         .context("Error querying undownloaded email IDs")?;
 
         Ok(rows.into_iter().map(|row| row.id).collect())
+    }
+
+    async fn delete_emails(
+        &self,
+        account_id: AccountId,
+        email_ids: &[String],
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool().begin().await?;
+
+        for email_id in email_ids {
+            sqlx::query!(
+                "DELETE FROM emails WHERE account_id = ? AND id = ?",
+                account_id,
+                email_id
+            )
+            .execute(&mut *tx)
+            .await
+            .context("Error deleting email")?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn update_emails(&self, account_id: AccountId, emails: &[Email]) -> anyhow::Result<()> {
+        let emails = serde_json::to_string(emails).context("Error serializing emails")?;
+
+        sqlx::query!(
+            "INSERT INTO emails (account_id, id, jmap_data)
+            SELECT ?, value->>'$.id', value FROM json_each(?)
+            WHERE true
+            ON CONFLICT DO UPDATE
+                SET jmap_data = EXCLUDED.jmap_data
+                WHERE jmap_data IS NULL
+            ",
+            account_id,
+            emails
+        )
+        .execute(self.pool())
+        .await
+        .context("Error updating emails")?;
+
+        Ok(())
     }
 }

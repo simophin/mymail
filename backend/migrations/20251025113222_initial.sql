@@ -36,15 +36,7 @@ CREATE INDEX idx_mailboxes_account_id ON mailboxes(account_id);
 CREATE TABLE emails(
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     id TEXT NOT NULL,
-    subject TEXT,
-    "from" TEXT,
-    "to" TEXT,
-    cc TEXT,
-    bcc TEXT,
-    reply_to TEXT,
-    date_sent TIMESTAMP,
-    date_received TIMESTAMP,
-    downloaded BOOLEAN NOT NULL DEFAULT FALSE,
+    jmap_data TEXT,
     PRIMARY KEY (account_id, id)
 );
 

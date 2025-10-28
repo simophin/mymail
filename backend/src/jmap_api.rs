@@ -10,19 +10,29 @@ use jmap_client::core::response::{
     TaggedMethodResponse,
 };
 use jmap_client::{DataType, PushObject, email};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::pin::pin;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::instrument;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EmailQuery {
     pub anchor_id: Option<String>,
     pub sort: Vec<Comparator<email::query::Comparator>>,
     pub filters: Vec<Filter<email::query::Filter>>,
     pub limit: usize,
 }
+
+impl PartialEq for EmailQuery {
+    fn eq(&self, other: &Self) -> bool {
+        serde_json::to_string(self).unwrap_or_default()
+            == serde_json::to_string(other).unwrap_or_default()
+    }
+}
+
+impl Eq for EmailQuery {}
 
 #[derive(Debug)]
 enum JmapRequest {
