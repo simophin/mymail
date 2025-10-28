@@ -1,7 +1,12 @@
-use crate::jmap_account::AccountRepositoryExt;
+use crate::jmap_account::{AccountId, AccountRepositoryExt};
+use crate::jmap_sync::SyncCommand;
 use futures::future::try_join_all;
+use std::collections::HashMap;
+use tokio::sync::mpsc;
 
+mod future_set;
 mod jmap_account;
+mod jmap_api;
 mod jmap_repo;
 mod jmap_sync;
 mod repo;
@@ -44,9 +49,15 @@ async fn main() {
         accounts => accounts,
     };
 
-    let sync_tasks = accounts
-        .into_iter()
-        .map(|(account_id, _)| jmap_sync::run_jmap_sync(&repo, account_id));
+    let mut account_sync_commands: HashMap<AccountId, mpsc::Sender<SyncCommand>> =
+        Default::default();
+
+    let sync_tasks = accounts.into_iter().map(|(account_id, _)| {
+        let (commands_tx, commands_rx) = mpsc::channel(10);
+        account_sync_commands.insert(account_id, commands_tx);
+
+        jmap_sync::run_jmap_sync(&repo, account_id, commands_rx)
+    });
 
     try_join_all(sync_tasks)
         .await

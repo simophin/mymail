@@ -2,6 +2,7 @@ use crate::jmap_account::AccountId;
 use crate::repo::Repository;
 use anyhow::Context;
 use jmap_client::mailbox::Mailbox;
+use std::collections::HashSet;
 
 pub trait JmapRepositoryExt {
     async fn get_mailboxes_sync_state(
@@ -17,20 +18,11 @@ pub trait JmapRepositoryExt {
         deleted: Vec<String>,
     ) -> anyhow::Result<()>;
 
-    async fn get_mailbox_email_sync_state(
+    async fn find_downloaded_email_ids(
         &self,
         account_id: AccountId,
-        mailbox_id: &str,
-    ) -> anyhow::Result<Option<String>>;
-
-    async fn update_mailbox(
-        &self,
-        account_id: AccountId,
-        mailbox_id: &str,
-        new_email_sync_state: &str,
-        created: Vec<String>,
-        deleted: Vec<String>,
-    ) -> anyhow::Result<()>;
+        mail_ids: &[String],
+    ) -> anyhow::Result<HashSet<String>>;
 }
 
 impl JmapRepositoryExt for Repository {
@@ -122,89 +114,23 @@ impl JmapRepositoryExt for Repository {
         Ok(())
     }
 
-    async fn get_mailbox_email_sync_state(
+    async fn find_downloaded_email_ids(
         &self,
         account_id: AccountId,
-        mailbox_id: &str,
-    ) -> anyhow::Result<Option<String>> {
-        Ok(sqlx::query!(
-            "SELECT email_sync_state FROM mailboxes WHERE account_id = ? AND id = ?",
+        mail_ids: &[String],
+    ) -> anyhow::Result<HashSet<String>> {
+        let mail_ids = serde_json::to_string(mail_ids)?;
+        let rows = sqlx::query!(
+            "SELECT id FROM emails
+             WHERE account_id = ? AND id IN (SELECT value FROM json_each(?)) AND downloaded
+             ",
             account_id,
-            mailbox_id
+            mail_ids,
         )
-        .fetch_optional(self.pool())
+        .fetch_all(self.pool())
         .await
-        .context("Error querying mailbox email sync state")?
-        .context("Mailbox not found")?
-        .email_sync_state)
-    }
+        .context("Error querying undownloaded email IDs")?;
 
-    async fn update_mailbox(
-        &self,
-        account_id: AccountId,
-        mailbox_id: &str,
-        new_email_sync_state: &str,
-        created: Vec<String>,
-        deleted: Vec<String>,
-    ) -> anyhow::Result<()> {
-        let mut tx = self.pool().begin().await?;
-
-        for id in created {
-            sqlx::query!(
-                "INSERT OR IGNORE INTO emails (account_id, id) VALUES (?, ?)",
-                account_id,
-                id,
-            )
-            .execute(&mut *tx)
-            .await
-            .context("Error inserting created mailbox email")?;
-
-            sqlx::query!(
-                "INSERT OR IGNORE INTO mailbox_emails (mailbox_id, account_id, email_id) VALUES (?, ?, ?)",
-                mailbox_id,
-                account_id,
-                id
-            )
-            .execute(&mut *tx)
-            .await
-            .context("Error inserting created mailbox email")?;
-        }
-
-        for id in deleted {
-            sqlx::query!(
-                "DELETE FROM mailbox_emails WHERE mailbox_id = ? AND account_id = ? AND email_id = ?",
-                mailbox_id,
-                account_id,
-                id
-            )
-            .execute(&mut *tx)
-            .await
-            .context("Error deleting mailbox email")?;
-
-            // Delete all emails that are no longer in any mailbox
-            sqlx::query!(
-                "DELETE FROM emails WHERE account_id = ?1 AND id = ?2 AND id NOT IN (
-                    SELECT DISTINCT me.email_id FROM mailbox_emails me WHERE me.account_id = ?1
-                )",
-                account_id,
-                id
-            )
-            .execute(&mut *tx)
-            .await
-            .context("Error deleting orphaned email")?;
-        }
-
-        sqlx::query!(
-            "UPDATE mailboxes SET email_sync_state = ? WHERE account_id = ? AND id = ?",
-            new_email_sync_state,
-            account_id,
-            mailbox_id
-        )
-        .execute(&mut *tx)
-        .await
-        .context("Error updating mailbox email sync state")?;
-
-        tx.commit().await?;
-        Ok(())
+        Ok(rows.into_iter().map(|row| row.id).collect())
     }
 }

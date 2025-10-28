@@ -1,96 +1,48 @@
+use crate::future_set::FutureWorkers;
 use crate::jmap_account::{AccountId, AccountRepositoryExt, Credentials};
+use crate::jmap_api::{EmailQuery, JmapApi};
 use crate::jmap_repo::JmapRepositoryExt;
 use crate::repo::Repository;
 use anyhow::Context;
-use futures::StreamExt;
 use futures::future::{Either, select};
+use futures::{FutureExt, TryFutureExt};
 use jmap_client::client::Client;
-use jmap_client::client_ws::WebSocketMessage;
-use jmap_client::core::query::{Comparator, Filter};
-use jmap_client::core::request::Request;
-use jmap_client::core::response::TaggedMethodResponse;
+use jmap_client::core::query::Filter;
 use jmap_client::{DataType, PushObject, email};
-use std::collections::HashMap;
-use std::pin::pin;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use std::fmt::Debug;
+use std::pin::{Pin, pin};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::try_join;
+use tracing::instrument;
 use url::Url;
 
-#[derive(Debug)]
-enum JmapRequest {
-    MailboxChanges {
-        since_state: String,
-    },
-    QueryMailboxes,
-    GetMailboxByIds(Vec<String>),
-    QueryEmail {
-        anchor_id: Option<String>,
-        sort: Vec<Comparator<email::query::Comparator>>,
-        filters: Vec<Filter<email::query::Filter>>,
-        limit: usize,
-    },
-    EmailChanges {
-        since_state: String,
+pub enum EmailQueryState {
+    NotStarted,
+    InProgress,
+    Error(String),
+    UpToDate,
+}
+
+pub enum SyncCommand {
+    Watch {
+        query: watch::Receiver<EmailQuery>,
+        state_tx: watch::Sender<(EmailQuery, EmailQueryState)>,
     },
 }
 
-impl JmapRequest {
-    fn to_request(self, client: &Client) -> Request<'_> {
+impl Debug for SyncCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MailboxChanges { since_state, .. } => {
-                let mut req = client.build();
-                req.changes_mailbox(since_state).max_changes(100);
-                req
-            }
-
-            Self::QueryMailboxes => {
-                let mut req = client.build();
-                req.query_mailbox().limit(100);
-                req
-            }
-
-            Self::GetMailboxByIds(ids) => {
-                let mut req = client.build();
-                req.get_mailbox().ids(ids);
-                req
-            }
-
-            Self::QueryEmail {
-                anchor_id,
-                sort,
-                filters,
-                limit,
-            } => {
-                let mut req = client.build();
-                let query_email = filters
-                    .into_iter()
-                    .fold(req.query_email(), |r, f| r.filter(f))
-                    .limit(limit)
-                    .sort(sort);
-
-                if let Some(anchor_id) = anchor_id {
-                    query_email.anchor(anchor_id);
-                }
-
-                req
-            }
-
-            Self::EmailChanges { since_state } => {
-                let mut req = client.build();
-                req.changes_email(since_state);
-                req
-            }
+            SyncCommand::Watch { .. } => f.debug_struct("Watch").finish(),
         }
     }
 }
 
-type JmapRequestCallback = oneshot::Sender<Vec<TaggedMethodResponse>>;
-
-pub enum SyncCommand {
-    SubscribeToMailbox { mailbox_id: String },
-}
-
-pub async fn run_jmap_sync(repo: &Repository, account_id: AccountId) -> anyhow::Result<()> {
+pub async fn run_jmap_sync(
+    repo: &Repository,
+    account_id: AccountId,
+    mut sync_commands: mpsc::Receiver<SyncCommand>,
+) -> anyhow::Result<()> {
     let account = repo
         .get_account(account_id)
         .await?
@@ -110,145 +62,55 @@ pub async fn run_jmap_sync(repo: &Repository, account_id: AccountId) -> anyhow::
 
     tracing::info!("Connected to JMAP server");
 
-    let mut ws_stream = client
-        .connect_ws()
-        .await
-        .context("Failed to connect to JMAP server with websockets")?;
-
-    client
-        .enable_push_ws(
-            Some([DataType::Core, DataType::Mailbox]),
-            None::<&'static str>,
-        )
-        .await
-        .context("Failed to enable push via ws")?;
-
-    let (pending_requests, mut pending_requests_rx) =
-        mpsc::channel::<(JmapRequest, JmapRequestCallback)>(10);
-
-    let (mailboxes_changed_tx, mailboxes_changed) = broadcast::channel::<String>(10);
-
-    let run_ws_stream = async {
-        let mut requests: HashMap<String, oneshot::Sender<Vec<TaggedMethodResponse>>> =
-            Default::default();
+    let (jmap_api, jmap_api_worker) = JmapApi::new(client).await?;
+    let sync_account = sync_account(repo, account_id, &jmap_api);
+    let handle_sync_commands = async {
+        let mut sync_command_workers = FutureWorkers::new();
 
         loop {
-            let pending_request = pin!(pending_requests_rx.recv());
-            match select(ws_stream.next(), pending_request).await {
-                Either::Left((
-                    Some(Ok(WebSocketMessage::PushNotification(PushObject::StateChange {
-                        changed,
-                    }))),
-                    _,
-                )) if changed
-                    .iter()
-                    .any(|(_, r)| r.contains_key(&DataType::Mailbox)) =>
-                {
-                    tracing::info!("Received push notification: {changed:?} ");
-                    for (_, id) in changed
-                        .into_iter()
-                        .flat_map(|(_, r)| r.into_iter())
-                        .filter(|(t, _)| *t == DataType::Mailbox)
-                    {
-                        let _ = mailboxes_changed_tx.send(id);
-                    }
+            match select(pin!(&mut sync_command_workers), pin!(sync_commands.recv())).await {
+                Either::Left((_, _)) => {
+                    // One of the sync command workers finished
                 }
 
-                Either::Left((Some(Ok(WebSocketMessage::PushNotification(obj))), _)) => {
-                    tracing::info!("Received push notification: {obj:?}");
-                }
+                Either::Right((Some(sync_command), _)) => {
+                    tracing::info!("Handling sync command: {sync_command:?}");
 
-                Either::Left((Some(Ok(WebSocketMessage::Response(response))), _)) => {
-                    tracing::debug!("Received tagged method response: {response:?}");
-                    if let Some(cb) = response.request_id().and_then(|id| requests.remove(id)) {
-                        let _ = cb.send(response.unwrap_method_responses());
-                        continue;
-                    }
-                }
-
-                Either::Left((Some(Err(e)), _)) => {
-                    return Err(e).context("Error receiving WS message");
-                }
-
-                Either::Left((None, _)) => {
-                    tracing::info!("WebSocket stream closed");
-                    break;
-                }
-
-                Either::Right((Some((req, cb)), _)) => {
-                    tracing::info!("Sending {req:?}");
-
-                    let request_id = req
-                        .to_request(&client)
-                        .send_ws()
-                        .await
-                        .context("Failed to send WS message")?;
-
-                    tracing::debug!("Sent request with request_id = {request_id}");
-                    requests.insert(request_id, cb);
+                    let worker = handle_sync_command(repo, account_id, &jmap_api, sync_command);
+                    sync_command_workers.add_future(Box::pin(worker));
                 }
 
                 Either::Right((None, _)) => {
-                    tracing::info!("Pending requests channel closed");
+                    tracing::info!("Sync commands channel closed");
                     break;
                 }
             }
         }
 
-        Ok(())
+        anyhow::Ok(())
     };
 
-    let sync_account = sync_account(repo, account_id, &pending_requests, mailboxes_changed);
+    try_join!(jmap_api_worker, sync_account, handle_sync_commands)?;
 
-    try_join!(run_ws_stream, sync_account)?;
     Ok(())
-}
-
-async fn send_ws_request(
-    request_sender: &mpsc::Sender<(JmapRequest, JmapRequestCallback)>,
-    req: JmapRequest,
-) -> anyhow::Result<TaggedMethodResponse> {
-    let (callback, resp_rx) = oneshot::channel();
-
-    request_sender
-        .send((req, callback))
-        .await
-        .context("Error sending WS request")?;
-
-    Ok(resp_rx
-        .await
-        .context("Error receiving WS response")?
-        .into_iter()
-        .next()
-        .context("No response received")?)
 }
 
 async fn sync_account(
     repo: &Repository,
     account_id: AccountId,
-    request_sender: &mpsc::Sender<(JmapRequest, JmapRequestCallback)>,
-    mut mailbox_changed: broadcast::Receiver<String>,
+    jmap_api: &JmapApi,
 ) -> anyhow::Result<()> {
     loop {
         let (new_state, updated, deleted) = match repo.get_mailboxes_sync_state(account_id).await? {
             Some(since_state) if !since_state.is_empty() => {
-                let mut resp =
-                    send_ws_request(request_sender, JmapRequest::MailboxChanges { since_state })
-                        .await?
-                        .unwrap_changes_mailbox()
-                        .context("Expecting mailbox changes response")?;
-
+                let mut resp = jmap_api.mailboxes_changes(since_state).await?;
                 let mut updated = resp.take_created();
                 updated.extend(resp.take_updated());
                 (resp.take_new_state(), updated, resp.take_destroyed())
             }
 
             _ => {
-                let mut resp = send_ws_request(request_sender, JmapRequest::QueryMailboxes)
-                    .await?
-                    .unwrap_query_mailbox()
-                    .context("Expecting mailbox query response")?;
-
+                let mut resp = jmap_api.query_mailboxes().await?;
                 tracing::info!("Got mailbox query: {resp:?}");
                 (resp.take_query_state(), resp.take_ids(), vec![])
             }
@@ -264,11 +126,10 @@ async fn sync_account(
         let updated = if updated.is_empty() {
             vec![]
         } else {
-            send_ws_request(request_sender, JmapRequest::GetMailboxByIds(updated))
+            jmap_api
+                .get_mailboxes(updated)
                 .await
                 .context("Error getting mailboxes")?
-                .unwrap_get_mailbox()
-                .context("Expecting mailbox query response")?
                 .take_list()
         };
 
@@ -276,9 +137,12 @@ async fn sync_account(
             .await
             .context("Failed to update mailboxes")?;
 
-        if mailbox_changed.recv().await.is_err() {
-            break;
-        }
+        jmap_api
+            .wait_for_pushes(|o| {
+                matches!(o, PushObject::StateChange { changed }
+                if changed.iter().any(|(_, m)| m.contains_key(&DataType::Mailbox)))
+            })
+            .await?;
 
         tracing::info!("Mailboxes changed")
     }
@@ -286,42 +150,81 @@ async fn sync_account(
     Ok(())
 }
 
-async fn async_mailbox(
+#[instrument(skip(repo, jmap_api))]
+async fn handle_sync_command(
     repo: &Repository,
     account_id: AccountId,
-    request_sender: &mpsc::Sender<(JmapRequest, JmapRequestCallback)>,
-    mailbox_id: &str,
+    jmap_api: &JmapApi,
+    sync_command: SyncCommand,
 ) -> anyhow::Result<()> {
-    loop {
-        match repo
-            .get_mailbox_email_sync_state(account_id, mailbox_id)
-            .await?
-        {
-            Some(since_state) if !since_state.is_empty() => {
-                let mut resp = send_ws_request(
-                    request_sender,
-                    JmapRequest::EmailChanges {
-                        mailbox_id: mailbox_id.to_string(),
-                        since_state,
-                    },
-                )
-                .await
-                .context("Error sending WS email changes request")?
-                .unwrap_changes_email()
-                .context("Expecting email changes response")?;
-            }
+    match sync_command {
+        SyncCommand::Watch { query, state_tx } => {
+            handle_watch_command(repo, account_id, jmap_api, query, state_tx).await
+        }
+    }
+}
 
-            _ => {
-                let resp = send_ws_request(
-                    request_sender,
-                    JmapRequest::QueryEmail {
-                        mailbox_id: mailbox_id.to_string(),
-                    },
-                )
+async fn handle_watch_command(
+    repo: &Repository,
+    account_id: AccountId,
+    jmap_api: &JmapApi,
+    query_rx: watch::Receiver<EmailQuery>,
+    state_tx: watch::Sender<(EmailQuery, EmailQueryState)>,
+) -> anyhow::Result<()> {
+    let mut sync_state = None;
+
+    loop {
+        let fetch_results = async {
+            if let Some(state) = sync_state {
+            } else {
+            }
+        };
+
+        if let Some(state) = sync_state {
+            let query = query_rx.borrow().clone();
+            state_tx.send((query.clone(), EmailQueryState::InProgress))?;
+
+            let result = async {
+                let mut query_resp = jmap_api
+                    .query_emails(query.clone())
+                    .await
+                    .context("Failed to query emails")?;
+
+                let downloaded_id = repo
+                    .find_downloaded_email_ids(account_id, query_resp.ids())
+                    .await
+                    .context("Failed to find downloaded emails")?;
+
+                let email_resp = jmap_api
+                    .get_emails(
+                        query_resp
+                            .take_ids()
+                            .into_iter()
+                            .filter(|id| !downloaded_id.contains(id))
+                            .collect(),
+                    )
+                    .await
+                    .context("Failed to get emails")?;
+            }
+            .await;
+
+            match jmap_api
+                .query_emails(query.clone())
+                .and_then(|mut resp| {
+                    jmap_api
+                        .get_emails(resp.take_ids())
+                        .map_ok(|email_resp| (resp.take_query_state(), email_resp))
+                })
                 .await
-                .context("Error sending WS query email request")?
-                .unwrap_query_email()
-                .context("Expecting email query response")?;
+            {
+                Ok((state, resp)) => {
+                    //TODO: Update repo with new emails
+                    state_tx.send((query, EmailQueryState::UpToDate))?;
+                }
+                Err(e) => {
+                    tracing::error!(?e, "Error querying emails");
+                    state_tx.send((query, EmailQueryState::Error(e.to_string())))?;
+                }
             }
         }
     }
