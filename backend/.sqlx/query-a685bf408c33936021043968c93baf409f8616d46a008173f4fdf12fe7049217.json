@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT jmap_data FROM mailboxes WHERE account_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "jmap_data",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a685bf408c33936021043968c93baf409f8616d46a008173f4fdf12fe7049217"
+}

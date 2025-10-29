@@ -1,9 +1,17 @@
+use crate::api::ApiState;
 use crate::jmap_account::{AccountId, AccountRepositoryExt};
 use crate::jmap_sync::SyncCommand;
+use anyhow::{Context, format_err};
+use futures::TryFutureExt;
 use futures::future::try_join_all;
+use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::net::TcpListener;
 use tokio::sync::mpsc;
+use tokio::try_join;
 
+mod api;
 mod future_set;
 mod jmap_account;
 mod jmap_api;
@@ -20,9 +28,11 @@ async fn main() {
 
     tracing::info!("Using database {database_file}");
 
-    let repo = repo::Repository::new(&database_file)
-        .await
-        .expect("Failed to initialize DB repository");
+    let repo = Arc::new(
+        repo::Repository::new(&database_file)
+            .await
+            .expect("Failed to initialize DB repository"),
+    );
 
     let accounts = match repo.list_accounts().await.expect("Failed to list accounts") {
         accounts if accounts.is_empty() => {
@@ -49,17 +59,37 @@ async fn main() {
         accounts => accounts,
     };
 
-    let mut account_sync_commands: HashMap<AccountId, mpsc::Sender<SyncCommand>> =
+    let account_sync_commands: Arc<RwLock<HashMap<AccountId, mpsc::Sender<SyncCommand>>>> =
         Default::default();
 
     let sync_tasks = accounts.into_iter().map(|(account_id, _)| {
         let (commands_tx, commands_rx) = mpsc::channel(10);
-        account_sync_commands.insert(account_id, commands_tx);
+        account_sync_commands
+            .write()
+            .insert(account_id, commands_tx);
 
         jmap_sync::run_jmap_sync(&repo, account_id, commands_rx)
     });
 
-    try_join_all(sync_tasks)
-        .await
-        .expect("Failed to sync accounts");
+    let sync_tasks = try_join_all(sync_tasks).map_err(|e| format_err!("Sync task error: {e:?}"));
+
+    // Run axum API server in a separate task
+    let serve_axum_app = async {
+        let axum_app = api::build_api_router().with_state(ApiState {
+            repo: repo.clone(),
+            sync_command_sender: account_sync_commands.clone(),
+        });
+        let listener = TcpListener::bind("127.0.0.1:4000").await?;
+
+        tracing::info!(
+            "API server listening on http://{}",
+            listener.local_addr().unwrap()
+        );
+
+        axum::serve(listener, axum_app)
+            .await
+            .context("Error serving axum app")
+    };
+
+    try_join!(sync_tasks, serve_axum_app).expect("Error running tasks");
 }

@@ -10,29 +10,32 @@ use jmap_client::core::response::{
     TaggedMethodResponse,
 };
 use jmap_client::{DataType, PushObject, email};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::pin::pin;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::instrument;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub enum EmailSortColumn {
+    Date,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct EmailSort {
+    pub column: EmailSortColumn,
+    pub asc: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct EmailQuery {
     pub anchor_id: Option<String>,
-    pub sort: Vec<Comparator<email::query::Comparator>>,
-    pub filters: Vec<Filter<email::query::Filter>>,
+    pub mailbox_id: Option<String>,
+    pub search_keyword: Option<String>,
+    pub sorts: Vec<EmailSort>,
     pub limit: usize,
 }
-
-impl PartialEq for EmailQuery {
-    fn eq(&self, other: &Self) -> bool {
-        serde_json::to_string(self).unwrap_or_default()
-            == serde_json::to_string(other).unwrap_or_default()
-    }
-}
-
-impl Eq for EmailQuery {}
 
 #[derive(Debug)]
 enum JmapRequest {
@@ -67,19 +70,54 @@ impl JmapRequest {
 
             Self::QueryEmail(EmailQuery {
                 anchor_id,
-                sort,
-                filters,
+                mailbox_id,
+                search_keyword,
+                sorts,
                 limit,
             }) => {
                 let mut req = client.build();
-                let query_email = filters
-                    .into_iter()
-                    .fold(req.query_email(), |r, f| r.filter(f))
-                    .limit(limit)
-                    .sort(sort);
+                let query = req.query_email().limit(limit);
 
+                // Construct filters
+                let mut filters = Vec::new();
+                if let Some(mailbox_id) = mailbox_id {
+                    filters.push(email::query::Filter::InMailbox { value: mailbox_id });
+                }
+
+                if let Some(search_keyword) = search_keyword {
+                    filters.push(email::query::Filter::Text {
+                        value: search_keyword,
+                    });
+                }
+
+                if !filters.is_empty() {
+                    query.filter(Filter::and(filters));
+                }
+
+                // Sorts
+                if !sorts.is_empty() {
+                    let jmap_sorts: Vec<_> = sorts
+                        .into_iter()
+                        .map(|s| {
+                            let comparator = match s.column {
+                                EmailSortColumn::Date => {
+                                    Comparator::new(email::query::Comparator::ReceivedAt)
+                                }
+                            };
+
+                            if s.asc {
+                                comparator.ascending()
+                            } else {
+                                comparator.descending()
+                            }
+                        })
+                        .collect();
+                    query.sort(jmap_sorts);
+                }
+
+                // Anchor
                 if let Some(anchor_id) = anchor_id {
-                    query_email.anchor(anchor_id);
+                    query.anchor(anchor_id);
                 }
 
                 req

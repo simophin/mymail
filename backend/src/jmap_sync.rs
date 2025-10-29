@@ -144,8 +144,6 @@ async fn sync_account(
 
         tracing::info!("Mailboxes changed")
     }
-
-    Ok(())
 }
 
 #[instrument(skip(repo, jmap_api))]

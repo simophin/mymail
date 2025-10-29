@@ -47,13 +47,13 @@ impl Repository {
         });
     }
 
-    pub fn notify_changes_with(
-        &self,
-        result: SqliteQueryResult,
-        tables: fn() -> &'static [&'static str],
-    ) {
+    pub fn notify_changes_with(&self, result: SqliteQueryResult, tables: &[&'static str]) {
         if result.rows_affected() > 0 {
-            self.notify_changes(tables());
+            self.notify_changes(tables);
         }
+    }
+
+    pub fn subscribe_db_changes(&self) -> broadcast::Receiver<Changes> {
+        self.changes.subscribe()
     }
 }

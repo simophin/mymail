@@ -20,15 +20,7 @@ CREATE INDEX idx_identities_account_id ON identities(account_id);
 CREATE TABLE mailboxes (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    role TEXT,
-    sort_order INTEGER NOT NULL,
-    total_emails INTEGER NOT NULL,
-    unread_emails INTEGER NOT NULL,
-    total_threads INTEGER NOT NULL,
-    unread_threads INTEGER NOT NULL,
-    my_rights TEXT,
-    parent_id TEXT,
+    jmap_data TEXT NOT NULL,
     PRIMARY KEY (account_id, id)
 );
 CREATE INDEX idx_mailboxes_account_id ON mailboxes(account_id);

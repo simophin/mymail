@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM emails WHERE account_id = ? AND id IN (SELECT value FROM json_each(?))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f21197683a11abc009ad33ef79da5bd8befd1a546b52944a0cb7f6964bccf55f"
+}
