@@ -1,8 +1,8 @@
 use super::ApiState;
 use crate::jmap_account::AccountId;
 use crate::jmap_api::EmailQuery;
-use crate::jmap_repo::JmapRepositoryExt;
-use crate::jmap_sync::SyncCommand;
+use crate::jmap_repo::{EmailDbQuery, JmapRepositoryExt};
+use crate::jmap_sync::{EmailQueryState, SyncCommand, WatchSyncCommand};
 use axum::extract;
 use axum::extract::Path;
 use axum::http::StatusCode;
@@ -13,23 +13,20 @@ use tokio::sync::watch;
 pub async fn watch_mail(
     account_id: Path<AccountId>,
     state: extract::State<ApiState>,
-    query: extract::Json<EmailQuery>,
+    query: extract::Query<EmailDbQuery>,
 ) -> impl IntoResponse {
-    let (_, query_rx) = watch::channel(query.0.clone());
-    let (state_tx, state_rx) = watch::channel((
-        query.0.clone(),
-        crate::jmap_sync::EmailQueryState::NotStarted,
-    ));
+    let (_, query_rx) = watch::channel(None);
+    let (state_tx, state_rx) = watch::channel(EmailQueryState::NotStarted);
 
     let Some(command_sender) = state.sync_command_sender.read().get(&account_id).cloned() else {
         return (StatusCode::NOT_FOUND, "Account not found").into_response();
     };
 
     if let Err(e) = command_sender
-        .send(SyncCommand::Watch {
+        .send(SyncCommand::Watch(WatchSyncCommand {
             query: query_rx,
             state_tx,
-        })
+        }))
         .await
     {
         return (

@@ -29,6 +29,15 @@ CREATE TABLE emails(
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     id TEXT NOT NULL,
     jmap_data TEXT,
+    thread_id TEXT GENERATED ALWAYS AS (jmap_data->>'$.threadId') VIRTUAL,
+    sent_at TEXT GENERATED ALWAYS AS (jmap_data->>'$.sentAt') VIRTUAL,
+    received_at TEXT GENERATED ALWAYS AS (jmap_data->>'$.receivedAt') VIRTUAL,
+    subject TEXT GENERATED ALWAYS AS (jmap_data->>'$.subject') VIRTUAL,
+    text_body TEXT GENERATED ALWAYS AS (jmap_data->'$.textBody') VIRTUAL,
+    html_body TEXT GENERATED ALWAYS AS (jmap_data->'$.htmlBody') VIRTUAL,
+    `from` TEXT GENERATED ALWAYS AS (jmap_data->'$.from') VIRTUAL,
+    `to` TEXT GENERATED ALWAYS AS (jmap_data->'$.to') VIRTUAL,
+    `cc` TEXT GENERATED ALWAYS AS (jmap_data->'$.cc') VIRTUAL,
     PRIMARY KEY (account_id, id)
 );
 

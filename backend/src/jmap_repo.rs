@@ -1,10 +1,24 @@
 use crate::jmap_account::AccountId;
-use crate::jmap_api::EmailQuery;
+use crate::jmap_api::{EmailSort, EmailSortColumn};
 use crate::repo::Repository;
 use anyhow::Context;
+use itertools::Itertools;
 use jmap_client::email::Email;
 use jmap_client::mailbox::Mailbox;
+use serde::Deserialize;
+use sqlx::Row;
+use sqlx::sqlite::SqliteRow;
 use std::collections::HashSet;
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct EmailDbQuery {
+    pub account_id: AccountId,
+    pub mailbox_id: Option<String>,
+    pub search_keyword: Option<String>,
+    pub sorts: Vec<EmailSort>,
+    pub limit: usize,
+    pub offset: usize,
+}
 
 pub trait JmapRepositoryExt {
     async fn get_mailboxes_sync_state(
@@ -34,11 +48,7 @@ pub trait JmapRepositoryExt {
 
     async fn update_emails(&self, account_id: AccountId, emails: &[Email]) -> anyhow::Result<()>;
 
-    async fn get_emails(
-        &self,
-        account_id: AccountId,
-        query: &EmailQuery,
-    ) -> anyhow::Result<Vec<Email>>;
+    async fn get_emails(&self, query: &EmailDbQuery) -> anyhow::Result<Vec<Email>>;
 
     async fn get_mailboxes(&self, account_id: AccountId) -> anyhow::Result<Vec<Mailbox>>;
 }
@@ -178,13 +188,53 @@ impl JmapRepositoryExt for Repository {
         Ok(())
     }
 
-    async fn get_emails(
-        &self,
-        account_id: AccountId,
-        query: &EmailQuery,
-    ) -> anyhow::Result<Vec<Email>> {
-        //TODO: implement query filtering
-        Ok(vec![])
+    async fn get_emails(&self, query: &EmailDbQuery) -> anyhow::Result<Vec<Email>> {
+        let sort_clause = query
+            .sorts
+            .iter()
+            .map(|sort| (sort.column.to_sql_column(), sort.asc))
+            .chain(std::iter::once(("id", true)))
+            .map(|(column, asc)| {
+                if asc {
+                    column.to_string()
+                } else {
+                    format!("{column} DESC")
+                }
+            })
+            .join(", ");
+
+        //language=sqlite
+        sqlx::query(&format!(
+            "
+            SELECT jmap_data FROM emails
+            WHERE account_id = :account_id
+                AND (
+                    :mailbox_id IS NULL OR
+                        EXISTS (SELECT 1 FROM mailbox_emails me
+                                WHERE me.account_id = :account_id
+                                  AND me.email_id = emails.id
+                                  AND me.mailbox_id = :mailbox_id)
+                )
+                AND (
+                    :search_keyword IS NULL OR
+                    subject LIKE '%' || :search_keyword || '%'
+                )
+            ORDER BY {sort_clause}
+            LIMIT :offset, :limit
+        "
+        ))
+        .bind(query.account_id)
+        .bind(query.mailbox_id.as_ref())
+        .bind(query.search_keyword.as_ref())
+        .bind(query.offset as i64)
+        .bind(query.limit as i64)
+        .try_map(|row: SqliteRow| {
+            serde_json::from_str::<Email>(&row.get::<String, _>(0))
+                .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+        })
+        .fetch_all(self.pool())
+        .await
+        .context("Error querying emails")
     }
 
     async fn get_mailboxes(&self, account_id: AccountId) -> anyhow::Result<Vec<Mailbox>> {
@@ -200,5 +250,13 @@ impl JmapRepositoryExt for Repository {
             serde_json::from_str::<Mailbox>(&r.jmap_data).context("Error deserializing mailbox")
         })
         .collect()
+    }
+}
+
+impl EmailSortColumn {
+    fn to_sql_column(&self) -> &'static str {
+        match self {
+            Self::Date => "received_at",
+        }
     }
 }
