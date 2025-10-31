@@ -3,13 +3,14 @@ use crate::jmap_sync::SyncCommand;
 use crate::repo::Repository;
 use anyhow::Context;
 use axum::body::Body;
-use axum::routing::get;
+use axum::routing::{get, post};
 use parking_lot::RwLock;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+mod sync_mail;
 mod watch_mail;
 mod watch_mailboxes;
 
@@ -21,10 +22,10 @@ pub struct ApiState {
 
 pub fn build_api_router() -> axum::Router<ApiState> {
     use axum::Router;
-    use axum::routing::post;
 
     Router::new()
         .route("/mails/{account_id}", post(watch_mail::watch_mail))
+        .route("/mails/sync/{account_id}", post(sync_mail::sync_mail))
         .route(
             "/mailboxes/{account_id}",
             get(watch_mailboxes::watch_mailboxes),
@@ -63,7 +64,13 @@ where
         .and_then(move |_| {
             let repo = repo.clone();
             let mut query = query.clone();
-            async move { query(repo).await }
+            async move {
+                let r = query(repo).await;
+                if let Err(e) = &r {
+                    tracing::error!(?e, "Error executing query");
+                }
+                r
+            }
         })
         .map(|r| match r {
             Ok(data) => {

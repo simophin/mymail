@@ -244,6 +244,10 @@ impl JmapApi {
         }
     }
 
+    pub fn subscribe_pushes(&self) -> broadcast::Receiver<Arc<PushObject>> {
+        self.notification_receiver.resubscribe()
+    }
+
     async fn send_ws_request(&self, req: JmapRequest) -> anyhow::Result<TaggedMethodResponse> {
         let (callback, resp_rx) = oneshot::channel();
 
