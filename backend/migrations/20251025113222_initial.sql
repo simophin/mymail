@@ -28,7 +28,7 @@ CREATE INDEX idx_mailboxes_account_id ON mailboxes(account_id);
 CREATE TABLE emails(
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     id TEXT NOT NULL,
-    jmap_data TEXT,
+    jmap_data TEXT NOT NULL,
     thread_id TEXT GENERATED ALWAYS AS (jmap_data->>'$.threadId') VIRTUAL,
     sent_at TEXT GENERATED ALWAYS AS (jmap_data->>'$.sentAt') VIRTUAL,
     received_at TEXT GENERATED ALWAYS AS (jmap_data->>'$.receivedAt') VIRTUAL,

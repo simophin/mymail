@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO emails (account_id, id, jmap_data)\n            SELECT ?, value->>'$.id', value FROM json_each(?)\n            WHERE true\n            ON CONFLICT DO UPDATE\n                SET jmap_data = EXCLUDED.jmap_data\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "bf300006e39e66e7632eb282ad2172cbf40d84706888d1acb9baceb741ab3968"
+}

@@ -33,7 +33,7 @@ pub trait JmapRepositoryExt {
         deleted: Vec<String>,
     ) -> anyhow::Result<()>;
 
-    async fn find_downloaded_email_ids(
+    async fn find_missing_email_ids(
         &self,
         account_id: AccountId,
         mail_ids: &[String],
@@ -137,24 +137,22 @@ impl JmapRepositoryExt for Repository {
         Ok(())
     }
 
-    async fn find_downloaded_email_ids(
+    async fn find_missing_email_ids(
         &self,
         account_id: AccountId,
         mail_ids: &[String],
     ) -> anyhow::Result<HashSet<String>> {
-        let mail_ids = serde_json::to_string(mail_ids)?;
-        let rows = sqlx::query!(
-            "SELECT id FROM emails
-             WHERE account_id = ? AND id IN (SELECT value FROM json_each(?)) AND jmap_data IS NOT NULL
-             ",
-            account_id,
-            mail_ids,
+        let rows = sqlx::query(
+            "SELECT value FROM json_each(?) AS ids
+             WHERE NOT EXISTS (SELECT 1 FROM emails e WHERE e.account_id = ? AND e.id = ids.value)",
         )
+        .bind(serde_json::to_string(mail_ids)?)
+        .bind(account_id)
         .fetch_all(self.pool())
         .await
         .context("Error querying undownloaded email IDs")?;
 
-        Ok(rows.into_iter().map(|row| row.id).collect())
+        Ok(rows.into_iter().map(|row| row.get(0)).collect())
     }
 
     async fn delete_emails(
@@ -188,7 +186,6 @@ impl JmapRepositoryExt for Repository {
             WHERE true
             ON CONFLICT DO UPDATE
                 SET jmap_data = EXCLUDED.jmap_data
-                WHERE jmap_data IS NULL
             ",
             account_id,
             emails_as_json

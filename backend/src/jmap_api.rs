@@ -76,7 +76,7 @@ impl JmapRequest {
                 limit,
             }) => {
                 let mut req = client.build();
-                let query = req.query_email().limit(limit);
+                let query = req.query_email().limit(limit).calculate_total(true);
 
                 // Construct filters
                 let mut filters = Vec::new();
@@ -164,7 +164,7 @@ impl JmapApi {
 
         client
             .enable_push_ws(
-                Some([DataType::Core, DataType::Mailbox]),
+                Some([DataType::Core, DataType::Mailbox, DataType::Email]),
                 None::<&'static str>,
             )
             .await

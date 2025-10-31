@@ -19,9 +19,9 @@ use url::Url;
 #[serde(tag = "state")]
 pub enum EmailQueryState {
     NotStarted,
-    InProgress,
+    InProgress { prev_total: Option<usize> },
     Error { details: String },
-    UpToDate,
+    UpToDate { total: Option<usize> },
 }
 
 pub struct WatchSyncCommand {
@@ -174,39 +174,58 @@ async fn handle_watch_command(
         bail!("Failed to respond to watch command initiator");
     }
 
-    let mut last_sync_state = None::<String>;
+    struct LastSyncState {
+        state: String,
+        total: Option<usize>,
+    }
+
+    let mut last_sync_state = None::<LastSyncState>;
     let mut push_sub = jmap_api.subscribe_pushes();
 
     loop {
         let fetch_results = async {
-            let _ = query_state_tx.send(EmailQueryState::InProgress);
+            query_state_tx.send(EmailQueryState::InProgress {
+                prev_total: last_sync_state.as_ref().and_then(|s| s.total),
+            })?;
 
             let (updated, destroyed, new_state) = match &last_sync_state {
                 Some(state) => {
-                    let mut changes = jmap_api.email_changes(state.clone()).await?;
+                    let mut changes = jmap_api.email_changes(state.state.clone()).await?;
+                    let new_total = state
+                        .total
+                        .map(|total| total + changes.created().len() - changes.destroyed().len());
                     let mut created = changes.take_created();
                     created.extend(changes.take_updated());
-                    (created, changes.take_destroyed(), changes.take_new_state())
+                    (
+                        created,
+                        changes.take_destroyed(),
+                        LastSyncState {
+                            state: changes.take_new_state(),
+                            total: new_total,
+                        },
+                    )
                 }
 
                 _ => {
                     let mut resp = jmap_api.query_emails(query.clone()).await?;
-                    (resp.take_ids(), vec![], resp.take_query_state())
+                    (
+                        resp.take_ids(),
+                        vec![],
+                        LastSyncState {
+                            state: resp.take_query_state(),
+                            total: resp.total(),
+                        },
+                    )
                 }
             };
 
-            let already_downloaded = repo
-                .find_downloaded_email_ids(account_id, &updated)
+            let updated = repo
+                .find_missing_email_ids(account_id, &updated)
                 .await
                 .context("Failed to check downloaded emails")?;
 
-            let updated = updated
-                .into_iter()
-                .filter(|id| !already_downloaded.contains(id))
-                .collect::<Vec<_>>();
-
             if !updated.is_empty() {
-                let emails = jmap_api.get_emails(updated).await?;
+                let emails = jmap_api.get_emails(updated.into_iter().collect()).await?;
 
                 repo.update_emails(account_id, emails.list())
                     .await
@@ -217,28 +236,33 @@ async fn handle_watch_command(
                 .await
                 .context("Failed to delete emails")?;
 
+            let total = new_state.total;
             last_sync_state = Some(new_state);
 
-            anyhow::Ok(())
+            anyhow::Ok(total)
         };
 
-        if let Err(e) = fetch_results.await {
-            tracing::error!("Error syncing emails: {e:?}");
-            let _ = query_state_tx.send(EmailQueryState::Error {
-                details: e.to_string(),
-            });
-        } else {
-            let _ = query_state_tx.send(EmailQueryState::UpToDate);
+        match fetch_results.await {
+            Ok(total) => {
+                query_state_tx.send(EmailQueryState::UpToDate { total })?;
+            }
+
+            Err(e) => {
+                tracing::error!("Error syncing emails: {e:?}");
+                query_state_tx.send(EmailQueryState::Error {
+                    details: e.to_string(),
+                })?;
+            }
         }
 
         loop {
-            match push_sub.recv().await {
-                Err(_) => {
+            match select(pin!(push_sub.recv()), pin!(query_state_tx.closed())).await {
+                Either::Left((Err(_), _)) => {
                     tracing::info!("JMAP API push notification channel closed");
                     return Ok(());
                 }
 
-                Ok(push)
+                Either::Left((Ok(push), _))
                     if matches!(push.as_ref(), PushObject::StateChange { changed }
                     if changed.iter().any(|(_, m)| m.contains_key(&DataType::Email))) =>
                 {
@@ -246,9 +270,14 @@ async fn handle_watch_command(
                     break;
                 }
 
-                Ok(_) => {
+                Either::Left((Ok(_), _)) => {
                     // Irrelevant push notification
                     continue;
+                }
+
+                Either::Right((_, _)) => {
+                    tracing::info!("No one cares about output anymore, stopping watch");
+                    return Ok(());
                 }
             }
         }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM mailbox_emails WHERE\n                               (account_id, email_id) IN (SELECT ?1, value->>'$[1]' FROM json_each(?2)) AND\n                               (account_id, mailbox_id, email_id) NOT IN (\n                                    SELECT ?1, value->>'$[0]', value->>'$[1]' FROM json_each(?2)\n                                )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "89057bf993ae0a6b871bd8c3c143d8b4b023386ba8035ee51c757b5e0d9413e2"
+}

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::try_join;
+use tower_http::cors::{AllowMethods, AllowOrigin, CorsLayer};
 
 mod api;
 mod future_set;
@@ -75,10 +76,16 @@ async fn main() {
 
     // Run axum API server in a separate task
     let serve_axum_app = async {
-        let axum_app = api::build_api_router().with_state(ApiState {
-            repo: repo.clone(),
-            sync_command_sender: account_sync_commands.clone(),
-        });
+        let axum_app = api::build_api_router()
+            .layer(
+                CorsLayer::new()
+                    .allow_origin(AllowOrigin::any())
+                    .allow_methods(AllowMethods::any()),
+            )
+            .with_state(ApiState {
+                repo: repo.clone(),
+                sync_command_sender: account_sync_commands.clone(),
+            });
         let listener = TcpListener::bind("127.0.0.1:4000").await?;
 
         tracing::info!(
