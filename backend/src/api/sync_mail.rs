@@ -7,6 +7,7 @@ use axum::body::Body;
 use axum::extract;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use futures::TryStreamExt;
 use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::WatchStream;
@@ -51,6 +52,13 @@ pub async fn sync_mail(
         }
     };
 
-    Body::from_stream(WatchStream::new(state_rx).map(|state| serde_json::to_string(&state)))
-        .into_response()
+    Body::from_stream(
+        WatchStream::new(state_rx)
+            .map(|state| serde_json::to_string(&state))
+            .map_ok(|mut r| {
+                r.push('\n');
+                r
+            }),
+    )
+    .into_response()
 }

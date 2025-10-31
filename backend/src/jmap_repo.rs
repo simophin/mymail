@@ -223,9 +223,12 @@ impl JmapRepositoryExt for Repository {
         .rows_affected();
 
         changes += sqlx::query!(
-            "DELETE FROM mailbox_emails WHERE (account_id, mailbox_id, email_id) NOT IN (
-                SELECT ?, value->>'$[0]', value->>'$[1]' FROM json_each(?)
-            )",
+            "DELETE FROM mailbox_emails WHERE
+                               (account_id, email_id) IN (SELECT ?1, value->>'$[1]' FROM json_each(?2)) AND
+                               (account_id, mailbox_id, email_id) NOT IN (
+                                    SELECT ?1, value->>'$[0]', value->>'$[1]' FROM json_each(?2)
+                                )
+            ",
             account_id,
             mailbox_email_ids_json
         )
