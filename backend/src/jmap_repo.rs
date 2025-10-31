@@ -12,7 +12,9 @@ use std::collections::HashSet;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct EmailDbQuery {
+    #[serde(rename = "mailboxId")]
     pub mailbox_id: Option<String>,
+    #[serde(rename = "searchKeyword")]
     pub search_keyword: Option<String>,
     pub sorts: Vec<EmailSort>,
     pub limit: usize,

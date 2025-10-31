@@ -231,19 +231,6 @@ impl JmapApi {
         ))
     }
 
-    pub async fn wait_for_pushes(
-        &self,
-        qualifier: impl Fn(&PushObject) -> bool,
-    ) -> anyhow::Result<Arc<PushObject>> {
-        let mut rx = self.notification_receiver.resubscribe();
-        loop {
-            let o = rx.recv().await?;
-            if qualifier(&o) {
-                return Ok(o);
-            }
-        }
-    }
-
     pub fn subscribe_pushes(&self) -> broadcast::Receiver<Arc<PushObject>> {
         self.notification_receiver.resubscribe()
     }

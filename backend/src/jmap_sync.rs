@@ -103,6 +103,7 @@ async fn sync_account(
     account_id: AccountId,
     jmap_api: &JmapApi,
 ) -> anyhow::Result<()> {
+    let mut push_sub = jmap_api.subscribe_pushes();
     loop {
         let (new_state, updated, deleted) = match repo.get_mailboxes_sync_state(account_id).await? {
             Some(since_state) if !since_state.is_empty() => {
@@ -140,14 +141,23 @@ async fn sync_account(
             .await
             .context("Failed to update mailboxes")?;
 
-        jmap_api
-            .wait_for_pushes(|o| {
-                matches!(o, PushObject::StateChange { changed }
-                if changed.iter().any(|(_, m)| m.contains_key(&DataType::Mailbox)))
-            })
-            .await?;
+        loop {
+            match push_sub.recv().await?.as_ref() {
+                PushObject::StateChange { changed }
+                    if changed
+                        .iter()
+                        .any(|(_, m)| m.contains_key(&DataType::Mailbox)) =>
+                {
+                    tracing::info!("Mailboxes changed, restarting sync");
+                    break;
+                }
 
-        tracing::info!("Mailboxes changed")
+                _ => {
+                    // Irrelevant push notification
+                    continue;
+                }
+            }
+        }
     }
 }
 
@@ -236,15 +246,15 @@ async fn handle_watch_command(
                 .await
                 .context("Failed to delete emails")?;
 
-            let total = new_state.total;
-            last_sync_state = Some(new_state);
-
-            anyhow::Ok(total)
+            anyhow::Ok(new_state)
         };
 
         match fetch_results.await {
-            Ok(total) => {
-                query_state_tx.send(EmailQueryState::UpToDate { total })?;
+            Ok(new_state) => {
+                query_state_tx.send(EmailQueryState::UpToDate {
+                    total: new_state.total,
+                })?;
+                last_sync_state.replace(new_state);
             }
 
             Err(e) => {
