@@ -1,10 +1,8 @@
 use crate::jmap_account::AccountId;
 use crate::jmap_api::{EmailSort, EmailSortColumn};
-use crate::repo::Repository;
 use anyhow::Context;
 use itertools::Itertools;
 use jmap_client::email::Email;
-use jmap_client::mailbox::Mailbox;
 use serde::Deserialize;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
@@ -21,125 +19,8 @@ pub struct EmailDbQuery {
     pub offset: usize,
 }
 
-pub trait JmapRepositoryExt {
-    async fn get_mailboxes_sync_state(
-        &self,
-        account_id: AccountId,
-    ) -> anyhow::Result<Option<String>>;
-
-    async fn update_mailboxes(
-        &self,
-        account_id: AccountId,
-        new_state: &str,
-        updated: Vec<Mailbox>,
-        deleted: Vec<String>,
-    ) -> anyhow::Result<()>;
-
-    async fn find_missing_email_ids(
-        &self,
-        account_id: AccountId,
-        mail_ids: &[String],
-    ) -> anyhow::Result<HashSet<String>>;
-
-    async fn delete_emails(
-        &self,
-        account_id: AccountId,
-        email_ids: &[String],
-    ) -> anyhow::Result<()>;
-
-    async fn update_emails(&self, account_id: AccountId, emails: &[Email]) -> anyhow::Result<()>;
-
-    async fn get_emails(
-        &self,
-        account_id: AccountId,
-        query: &EmailDbQuery,
-    ) -> anyhow::Result<Vec<Email>>;
-
-    async fn get_mailboxes(&self, account_id: AccountId) -> anyhow::Result<Vec<Mailbox>>;
-}
-
-impl JmapRepositoryExt for Repository {
-    async fn get_mailboxes_sync_state(
-        &self,
-        account_id: AccountId,
-    ) -> anyhow::Result<Option<String>> {
-        Ok(sqlx::query!(
-            "SELECT mailboxes_sync_state FROM accounts WHERE id = ?",
-            account_id
-        )
-        .fetch_optional(self.pool())
-        .await
-        .context("Error querying mailboxes sync state")?
-        .context("Account not found")?
-        .mailboxes_sync_state)
-    }
-
-    async fn update_mailboxes(
-        &self,
-        account_id: AccountId,
-        new_state: &str,
-        updated: Vec<Mailbox>,
-        deleted: Vec<String>,
-    ) -> anyhow::Result<()> {
-        let mut tx = self.pool().begin().await?;
-
-        let num_inserted = if updated.is_empty() {
-            0
-        } else {
-            let updated = serde_json::to_string(&updated).context("Error serializing mailboxes")?;
-            sqlx::query!(
-                "INSERT INTO mailboxes (account_id, id, jmap_data)
-            SELECT ?, value->>'$.id', value FROM json_each(?)
-            WHERE true
-            ON CONFLICT DO UPDATE
-                SET jmap_data = EXCLUDED.jmap_data
-            ",
-                account_id,
-                updated
-            )
-            .execute(&mut *tx)
-            .await
-            .context("Error updating mailboxes")?
-            .rows_affected()
-        };
-
-        let num_deleted = if deleted.is_empty() {
-            0
-        } else {
-            let deleted =
-                serde_json::to_string(&deleted).context("Error serializing deletion ids")?;
-            sqlx::query!(
-                "DELETE FROM mailboxes
-            WHERE account_id = ? AND id IN (SELECT value FROM json_each(?))
-            ",
-                account_id,
-                deleted
-            )
-            .execute(&mut *tx)
-            .await
-            .context("Error deleting mailboxes")?
-            .rows_affected()
-        };
-
-        sqlx::query!(
-            "UPDATE accounts SET mailboxes_sync_state = ? WHERE id = ?",
-            new_state,
-            account_id
-        )
-        .execute(&mut *tx)
-        .await
-        .context("Error updating mailboxes sync state")?;
-
-        tx.commit().await?;
-
-        if num_inserted > 0 || num_deleted > 0 {
-            self.notify_changes(&["mailboxes"]);
-        }
-
-        Ok(())
-    }
-
-    async fn find_missing_email_ids(
+impl super::Repository {
+    pub async fn find_missing_email_ids(
         &self,
         account_id: AccountId,
         mail_ids: &[String],
@@ -157,7 +38,7 @@ impl JmapRepositoryExt for Repository {
         Ok(rows.into_iter().map(|row| row.get(0)).collect())
     }
 
-    async fn delete_emails(
+    pub async fn delete_emails(
         &self,
         account_id: AccountId,
         email_ids: &[String],
@@ -176,7 +57,11 @@ impl JmapRepositoryExt for Repository {
         Ok(())
     }
 
-    async fn update_emails(&self, account_id: AccountId, emails: &[Email]) -> anyhow::Result<()> {
+    pub async fn update_emails(
+        &self,
+        account_id: AccountId,
+        emails: &[Email],
+    ) -> anyhow::Result<()> {
         let mut tx = self.pool().begin().await?;
 
         let emails_as_json = serde_json::to_string(emails).context("Error serializing emails")?;
@@ -231,10 +116,10 @@ impl JmapRepositoryExt for Repository {
             account_id,
             mailbox_email_ids_json
         )
-        .execute(&mut *tx)
-        .await
-        .context("Error cleaning up mailbox_emails")?
-        .rows_affected();
+            .execute(&mut *tx)
+            .await
+            .context("Error cleaning up mailbox_emails")?
+            .rows_affected();
 
         tx.commit().await?;
 
@@ -245,7 +130,7 @@ impl JmapRepositoryExt for Repository {
         Ok(())
     }
 
-    async fn get_emails(
+    pub async fn get_emails(
         &self,
         account_id: AccountId,
         query: &EmailDbQuery,
@@ -296,21 +181,6 @@ impl JmapRepositoryExt for Repository {
         .fetch_all(self.pool())
         .await
         .context("Error querying emails")
-    }
-
-    async fn get_mailboxes(&self, account_id: AccountId) -> anyhow::Result<Vec<Mailbox>> {
-        sqlx::query!(
-            "SELECT jmap_data FROM mailboxes WHERE account_id = ?",
-            account_id
-        )
-        .fetch_all(self.pool())
-        .await
-        .context("Error querying mailboxes")?
-        .into_iter()
-        .map(|r| {
-            serde_json::from_str::<Mailbox>(&r.jmap_data).context("Error deserializing mailbox")
-        })
-        .collect()
     }
 }
 

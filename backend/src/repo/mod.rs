@@ -1,9 +1,16 @@
+mod emails;
+mod mailboxes;
+mod threads;
+
 use anyhow::Context;
 use sqlx::SqlitePool;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteQueryResult};
 use std::sync::Arc;
 use tokio::sync::broadcast;
+
+pub use emails::EmailDbQuery;
+pub use threads::Thread;
 
 #[derive(Clone)]
 pub struct Changes {

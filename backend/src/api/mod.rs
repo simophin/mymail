@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 mod sync_mail;
 mod watch_mail;
 mod watch_mailboxes;
+mod watch_threads;
 
 #[derive(Clone)]
 pub struct ApiState {

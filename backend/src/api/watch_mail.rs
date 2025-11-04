@@ -1,6 +1,6 @@
 use super::ApiState;
 use crate::jmap_account::AccountId;
-use crate::jmap_repo::{EmailDbQuery, JmapRepositoryExt};
+use crate::repo::EmailDbQuery;
 use axum::extract;
 use axum::extract::Path;
 use axum::response::IntoResponse;

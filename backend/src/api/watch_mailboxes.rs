@@ -1,6 +1,5 @@
 use super::ApiState;
 use crate::jmap_account::AccountId;
-use crate::jmap_repo::JmapRepositoryExt;
 use axum::extract;
 use axum::response::IntoResponse;
 

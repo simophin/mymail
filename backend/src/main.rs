@@ -16,7 +16,6 @@ mod api;
 mod future_set;
 mod jmap_account;
 mod jmap_api;
-mod jmap_repo;
 mod jmap_sync;
 mod repo;
 

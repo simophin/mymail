@@ -1,7 +1,6 @@
 use crate::future_set::FutureWorkers;
 use crate::jmap_account::{AccountId, AccountRepositoryExt, Credentials};
 use crate::jmap_api::{EmailQuery, JmapApi};
-use crate::jmap_repo::JmapRepositoryExt;
 use crate::repo::Repository;
 use anyhow::{Context, bail};
 use futures::future::{Either, select};
