@@ -4,7 +4,8 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-pub struct Pagination {
+pub struct ThreadQuery {
+    mailbox_id: String,
     limit: usize,
     offset: usize,
 }
@@ -12,15 +13,15 @@ pub struct Pagination {
 pub async fn watch_threads(
     state: extract::State<super::ApiState>,
     account_id: extract::Path<AccountId>,
-    mailbox_id: extract::Path<String>,
-    pagination: extract::Query<Pagination>,
+    extract::Query(ThreadQuery {
+        mailbox_id,
+        limit,
+        offset,
+    }): extract::Query<ThreadQuery>,
 ) -> impl IntoResponse {
-    let limit = pagination.limit;
-    let offset = pagination.offset;
-
     super::query_with_db_changes(state.repo.clone(), &["emails"], move |repo| {
         let account_id = account_id.0;
-        let mailbox_id = mailbox_id.0.clone();
+        let mailbox_id = mailbox_id.clone();
 
         async move {
             repo.get_threads(account_id, &mailbox_id, offset, limit)

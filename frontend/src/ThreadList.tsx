@@ -9,15 +9,9 @@ export type EmailSort = {
 }
 
 
-export type BasicEmailDbQuery = {
-    mailboxId?: string;
-    searchKeyword?: string;
-}
-
-export type EmailDbQuery = BasicEmailDbQuery & {
-    sorts: EmailSort[];
-    limit: number;
-    offset: number;
+export type ThreadQuery = {
+    accountId: AccountId,
+    mailboxId: string;
 }
 
 export type AccountId = number;
@@ -27,15 +21,18 @@ export type Email = {
     subject: string;
 }
 
-export type Thread = Email[];
+export type Thread = {
+    id: string;
+    emails: Email[];
+}
 
 type PageWatchState = {
     subscription: Subscription;
 }
 
-export default function MailList(props: {
-    accountId: AccountId;
-    query: BasicEmailDbQuery
+export default function ThreadList(props: {
+    query: ThreadQuery,
+    numPerPage: number,
 }) {
     const [pages, setPages] = createStore<Thread[][]>([]);
     const [watchState, setWatchState] = createStore<{ [page: number]: PageWatchState }>({});

@@ -31,6 +31,7 @@ pub fn build_api_router() -> axum::Router<ApiState> {
             "/mailboxes/{account_id}",
             get(watch_mailboxes::watch_mailboxes),
         )
+        .route("/threads/{account_id}", get(watch_threads::watch_threads))
 }
 
 fn query_with_db_changes<T, F, Fut>(
