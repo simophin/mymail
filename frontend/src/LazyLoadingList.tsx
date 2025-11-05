@@ -12,7 +12,7 @@ type PageSubscription = {
 
 type Page<T> = T[];
 
-type Props<T> = {
+export type Props<T> = {
     numPerPage: number,
     watchPage: (offset: number, limit: number) => Observable<T[]>,
     children: (item: T | null) => JSX.Element,

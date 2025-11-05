@@ -1,7 +1,10 @@
-import { Subscription } from "rxjs";
-import { createEffect, createSignal, Index } from "solid-js";
-import { createStore } from "solid-js/store/types/server.js";
-const apiUrl = import.meta.env.BASE_URL;
+import {createStore} from "solid-js/store/types/server.js";
+import LazyLoadingList, {Props as ListProps} from "./LazyLoadingList";
+import {splitProps} from "solid-js";
+import {streamApi} from "./streamApi";
+import * as rx from "rxjs";
+
+const apiUrl = import.meta.env.VITE_BASE_URL;
 
 export type EmailSort = {
     column: string;
@@ -19,6 +22,7 @@ export type AccountId = number;
 export type Email = {
     id: string;
     subject: string;
+    receivedAt: string
 }
 
 export type Thread = {
@@ -26,14 +30,18 @@ export type Thread = {
     emails: Email[];
 }
 
-type PageWatchState = {
-    subscription: Subscription;
-}
 
 export default function ThreadList(props: {
     query: ThreadQuery,
-    numPerPage: number,
-}) {
-    const [pages, setPages] = createStore<Thread[][]>([]);
-    const [watchState, setWatchState] = createStore<{ [page: number]: PageWatchState }>({});
+} & Omit<Omit<ListProps<Thread>, "children">, "watchPage">) {
+    const [localProps, listProps] = splitProps(props, ["query"]);
+    const watchPage = (offset: number, limit: number) => {
+        return streamApi<Thread[]>(`${apiUrl}/threads/${localProps.query.accountId}?mailbox_id=${localProps.query.mailboxId}&offset=${offset}&limit=${limit}`);
+    };
+
+    return <LazyLoadingList watchPage={watchPage} {...listProps}>
+        {(thread) => (
+            <div>{thread?.emails?.at(0)?.subject}</div>
+        )}
+    </LazyLoadingList>;
 }

@@ -1,5 +1,6 @@
 import { Observable } from "rxjs";
 
+
 export function streamApi<T>(request: RequestInfo | URL): Observable<T> {
     return new Observable<T>((subscriber) => {
         const controller = new AbortController();
@@ -23,7 +24,7 @@ export function streamApi<T>(request: RequestInfo | URL): Observable<T> {
             }
         }
 
-        fetchStream();
+        let _ = fetchStream();
 
         return () => {
             controller.abort();

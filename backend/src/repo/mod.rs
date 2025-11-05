@@ -10,7 +10,6 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 pub use emails::EmailDbQuery;
-pub use threads::Thread;
 
 #[derive(Clone)]
 pub struct Changes {
