@@ -31,3 +31,21 @@ export function streamApi<T>(request: RequestInfo | URL): Observable<T> {
         };
     });
 }
+
+export function streamWebSocketApi<T>(url: string): Observable<T> {
+    return new Observable<T>((subscriber) => {
+        const ws = new WebSocket(url);
+
+        ws.onmessage = (event) => {
+            subscriber.next(JSON.parse(event.data));
+        };
+
+        ws.onerror = (event) => {
+            subscriber.error(event);
+        };
+
+        return () => {
+            ws.close();
+        };
+    });
+}

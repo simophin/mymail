@@ -18,14 +18,14 @@ use url::Url;
 #[serde(tag = "state")]
 pub enum EmailQueryState {
     NotStarted,
-    InProgress { prev_total: Option<usize> },
+    InProgress,
     Error { details: String },
-    UpToDate { total: Option<usize> },
+    UpToDate,
 }
 
 pub struct WatchSyncCommand {
-    pub query: EmailQuery,
-    pub callback: oneshot::Sender<watch::Receiver<EmailQueryState>>,
+    pub query_rx: watch::Receiver<EmailQuery>,
+    pub state_tx: watch::Sender<EmailQueryState>,
 }
 
 pub enum SyncCommand {
@@ -176,13 +176,11 @@ async fn handle_watch_command(
     repo: &Repository,
     account_id: AccountId,
     jmap_api: &JmapApi,
-    WatchSyncCommand { query, callback }: WatchSyncCommand,
+    WatchSyncCommand {
+        mut query_rx,
+        state_tx,
+    }: WatchSyncCommand,
 ) -> anyhow::Result<()> {
-    let (query_state_tx, query_state_rx) = watch::channel(EmailQueryState::NotStarted);
-    if callback.send(query_state_rx).is_err() {
-        bail!("Failed to respond to watch command initiator");
-    }
-
     struct LastSyncState {
         state: String,
         total: Option<usize>,
@@ -193,9 +191,8 @@ async fn handle_watch_command(
 
     loop {
         let fetch_results = async {
-            query_state_tx.send(EmailQueryState::InProgress {
-                prev_total: last_sync_state.as_ref().and_then(|s| s.total),
-            })?;
+            state_tx.send(EmailQueryState::InProgress)?;
+            let query = query_rx.borrow().clone();
 
             let (updated, destroyed, new_state) = match &last_sync_state {
                 Some(state) => {
@@ -250,22 +247,20 @@ async fn handle_watch_command(
 
         match fetch_results.await {
             Ok(new_state) => {
-                query_state_tx.send(EmailQueryState::UpToDate {
-                    total: new_state.total,
-                })?;
+                state_tx.send(EmailQueryState::UpToDate)?;
                 last_sync_state.replace(new_state);
             }
 
             Err(e) => {
                 tracing::error!("Error syncing emails: {e:?}");
-                query_state_tx.send(EmailQueryState::Error {
+                state_tx.send(EmailQueryState::Error {
                     details: e.to_string(),
                 })?;
             }
         }
 
         loop {
-            match select(pin!(push_sub.recv()), pin!(query_state_tx.closed())).await {
+            match select(pin!(push_sub.recv()), pin!(query_rx.changed())).await {
                 Either::Left((Err(_), _)) => {
                     tracing::info!("JMAP API push notification channel closed");
                     return Ok(());
@@ -284,9 +279,15 @@ async fn handle_watch_command(
                     continue;
                 }
 
-                Either::Right((_, _)) => {
-                    tracing::info!("No one cares about output anymore, stopping watch");
+                Either::Right((Err(_), _)) => {
+                    tracing::info!("Query channel closed");
                     return Ok(());
+                }
+
+                Either::Right((Ok(_), _)) => {
+                    tracing::info!("Email query changed, restarting sync");
+                    last_sync_state = None;
+                    break;
                 }
             }
         }

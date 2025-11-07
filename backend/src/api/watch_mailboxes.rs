@@ -6,9 +6,13 @@ use axum::response::IntoResponse;
 pub async fn watch_mailboxes(
     account_id: extract::Path<AccountId>,
     state: extract::State<ApiState>,
+    upgrade: extract::ws::WebSocketUpgrade,
 ) -> impl IntoResponse {
-    super::query_with_db_changes(state.repo.clone(), &["mailboxes"], move |repo| {
-        let account_id = account_id.0;
-        async move { repo.get_mailboxes(account_id).await }
-    })
+    let account_id = account_id.0;
+    super::stream::websocket_db_stream(
+        upgrade,
+        state.repo.clone(),
+        &["mailboxes"],
+        move |repo| async move { repo.get_mailboxes(account_id).await },
+    )
 }

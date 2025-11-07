@@ -9,14 +9,14 @@ use std::sync::Arc;
 pub async fn watch_mail(
     account_id: Path<AccountId>,
     state: extract::State<ApiState>,
-    query: extract::Json<EmailDbQuery>,
+    query: extract::Query<EmailDbQuery>,
+    upgrade: extract::ws::WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let query = Arc::new(query.0.clone());
+    let query = Arc::new(query.0);
 
-    super::query_with_db_changes(state.repo.clone(), &["emails"], move |repo| {
+    super::stream::websocket_db_stream(upgrade, state.repo.clone(), &["emails"], move |repo| {
         let account_id = account_id.0;
         let query = query.clone();
         async move { repo.get_emails(account_id, &query).await }
     })
-    .into_response()
 }

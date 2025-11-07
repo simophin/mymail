@@ -15,50 +15,15 @@ use tokio_stream::wrappers::WatchStream;
 pub async fn sync_mail(
     state: extract::State<ApiState>,
     account_id: extract::Path<AccountId>,
-    query: extract::Json<EmailQuery>,
+    upgrade: extract::ws::WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let state_rx = match async {
-        let channel = state
-            .sync_command_sender
-            .write()
-            .get_mut(&account_id.0)
-            .cloned()
-            .context("Account not found")?;
-
-        let (callback, callback_rx) = oneshot::channel();
-
-        channel
-            .send(SyncCommand::Watch(WatchSyncCommand {
-                query: query.0,
-                callback,
-            }))
-            .await
-            .context("Error sending sync command")?;
-
-        callback_rx
-            .await
-            .context("Error receiving sync command response")
-    }
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::error!(?e, "Error initiating mail sync");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Error initiating mail sync: {e}"),
-            )
-                .into_response();
-        }
+    let Some(tx) = state.sync_command_sender.read().get(&account_id.0).cloned() else {
+        return (
+            StatusCode::NOT_FOUND,
+            format!("Account {} not found", account_id.0),
+        )
+            .into_response();
     };
 
-    Body::from_stream(
-        WatchStream::new(state_rx)
-            .map(|state| serde_json::to_string(&state))
-            .map_ok(|mut r| {
-                r.push('\n');
-                r
-            }),
-    )
-    .into_response()
+    upgrade.on_upgrade(move |websocket| async move {})
 }

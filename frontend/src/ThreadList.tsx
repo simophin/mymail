@@ -1,8 +1,9 @@
 import {createStore} from "solid-js/store/types/server.js";
 import LazyLoadingList, {Props as ListProps} from "./LazyLoadingList";
 import {splitProps} from "solid-js";
-import {streamApi} from "./streamApi";
+import {streamApi, streamWebSocketApi} from "./streamApi";
 import * as rx from "rxjs";
+import {retry, retryWhen} from "rxjs";
 
 const apiUrl = import.meta.env.VITE_BASE_URL;
 
@@ -36,7 +37,10 @@ export default function ThreadList(props: {
 } & Omit<Omit<ListProps<Thread>, "children">, "watchPage">) {
     const [localProps, listProps] = splitProps(props, ["query"]);
     const watchPage = (offset: number, limit: number) => {
-        return streamApi<Thread[]>(`${apiUrl}/threads/${localProps.query.accountId}?mailbox_id=${localProps.query.mailboxId}&offset=${offset}&limit=${limit}`);
+        return streamWebSocketApi<Thread[]>(`${apiUrl}/threads/${localProps.query.accountId}?mailbox_id=${localProps.query.mailboxId}&offset=${offset}&limit=${limit}`)
+            .pipe(
+                retry({ count: Infinity, delay: 1000 })
+            )
     };
 
     return <LazyLoadingList watchPage={watchPage} {...listProps}>
