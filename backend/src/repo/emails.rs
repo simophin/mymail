@@ -78,29 +78,19 @@ impl super::Repository {
             account_id,
             emails_as_json
         )
-        .execute(self.pool())
+        .execute(&mut *tx)
         .await
         .context("Error updating emails")?
         .rows_affected();
 
-        let mailbox_email_ids: Vec<(_, _)> = emails
-            .iter()
-            .flat_map(|email| {
-                email
-                    .mailbox_ids()
-                    .into_iter()
-                    .map(|mailbox_id| (mailbox_id, email.id().unwrap()))
-            })
-            .collect();
-
-        let mailbox_email_ids_json = serde_json::to_string(&mailbox_email_ids)
-            .context("Error serializing mailbox-email ids")?;
-
         changes += sqlx::query!(
-            "INSERT OR IGNORE INTO mailbox_emails (account_id, mailbox_id, email_id)
-            SELECT ?, value->>'$[0]', value->>'$[1]' FROM json_each(?)",
+            "INSERT OR IGNORE INTO mailbox_emails (account_id, mailbox_id, email_id, thread_id, received_at)
+            SELECT ?, mb.key, ea.value->>'$.id', ea.value->>'$.threadId', ea.value->>'$.receivedAt'
+            FROM json_each(?) AS ea,
+                 json_each(ea.value->'$.mailboxIds') AS mb
+            WHERE mb.value == true",
             account_id,
-            mailbox_email_ids_json
+            emails_as_json
         )
         .execute(&mut *tx)
         .await
@@ -109,13 +99,16 @@ impl super::Repository {
 
         changes += sqlx::query!(
             "DELETE FROM mailbox_emails WHERE
-                               (account_id, email_id) IN (SELECT ?1, value->>'$[1]' FROM json_each(?2)) AND
+                               (account_id, email_id) IN (SELECT ?1, value->>'$.id' FROM json_each(?2)) AND
                                (account_id, mailbox_id, email_id) NOT IN (
-                                    SELECT ?1, value->>'$[0]', value->>'$[1]' FROM json_each(?2)
+                                    SELECT ?1, mb.key, ea.value->>'$.id'
+                                    FROM json_each(?2) ea,
+                                        json_each(ea.value->'$.mailboxIds') AS mb
+                                    WHERE mb.value == true
                                 )
             ",
             account_id,
-            mailbox_email_ids_json
+            emails_as_json
         )
             .execute(&mut *tx)
             .await

@@ -57,9 +57,12 @@ CREATE TABLE mailbox_emails (
     account_id INTEGER NOT NULL,
     mailbox_id TEXT NOT NULL,
     email_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    received_at TEXT NOT NULL,
     PRIMARY KEY (account_id, mailbox_id, email_id),
     FOREIGN KEY (account_id, mailbox_id) REFERENCES mailboxes(account_id, id) ON DELETE CASCADE,
     FOREIGN KEY (account_id, email_id) REFERENCES emails(account_id, id) ON DELETE CASCADE
 );
 CREATE INDEX idx_mailbox_emails_account_mailbox ON mailbox_emails(account_id, mailbox_id);
 CREATE INDEX idx_mailbox_emails_account_email ON mailbox_emails(account_id, email_id);
+CREATE INDEX idx_mailbox_emails_account_email_threads ON mailbox_emails(account_id, email_id, thread_id, received_at);
