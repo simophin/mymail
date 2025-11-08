@@ -4,13 +4,12 @@ use crate::jmap_api::{EmailQuery, EmailSort, EmailSortColumn, JmapApi};
 use crate::repo::Repository;
 use anyhow::{Context, bail};
 use futures::FutureExt;
-use futures::future::{Either, FusedFuture, select, try_join_all};
+use futures::future::{FusedFuture, try_join_all};
 use itertools::Itertools;
-use jmap_client::{DataType, PushObject, email};
+use jmap_client::{DataType, PushObject};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::future::pending;
-use std::pin::pin;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -160,57 +159,48 @@ pub async fn sync_mailbox(
 ) -> anyhow::Result<()> {
     let (state_tx, _state_rx) = watch::channel(EmailQueryState::NotStarted);
 
-    let mut wait_for_push_notification = async || {
-        if state_tx.receiver_count() > 1 {
-            loop {
-                match email_notification.recv().await?.as_ref() {
-                    PushObject::StateChange { changed }
-                        if changed
-                            .values()
-                            .any(|m| m.get(&DataType::Mailbox) == Some(&mailbox_id)) =>
-                    {
-                        break Ok(());
-                    }
-
-                    _ => continue,
-                }
-            }
-        } else {
-            futures::future::pending::<()>().await;
-            Ok(())
-        }
-    };
-
     loop {
-        match select(
-            pin!(wait_for_push_notification()),
-            pin!(watcher_requests.recv()),
-        )
-        .await
-        {
-            Either::Left((Ok(_), _)) => {
-                tracing::debug!("Received push notification");
+        let wait_for_push = async {
+            if state_tx.receiver_count() > 1 {
+                tracing::debug!("Waiting for push notification for emails");
+                loop {
+                    match email_notification.recv().await?.as_ref() {
+                        PushObject::StateChange { changed }
+                            if changed.values().any(|m| m.contains_key(&DataType::Email)) =>
+                        {
+                            break anyhow::Ok(());
+                        }
+
+                        _ => continue,
+                    }
+                }
+            } else {
+                futures::future::pending::<()>().await;
+                Ok(())
+            }
+        };
+
+        select! {
+            r = wait_for_push => {
+                r.context("Failed to wait for push notification")?;
+                tracing::info!("Received push notification");
                 if state_tx.receiver_count() < 2 {
                     tracing::info!("No active watchers, not syncing");
                     continue;
                 }
             }
 
-            Either::Left((Err(e), _)) => {
-                tracing::error!(?e, "Error receiving push notification");
-                return Err(e);
-            }
+            req = watcher_requests.recv() => {
+                let Some(watch_request) = req else {
+                    tracing::debug!("Watcher requests channel closed, stop syncing",);
+                    return Ok(());
+                };
 
-            Either::Right((Some(watch_request), _)) => {
                 if watch_request.send(state_tx.subscribe()).is_ok() {
                     tracing::info!("Received a watcher request for mailbox");
                 } else {
                     continue;
                 }
-            }
-
-            Either::Right((None, _)) => {
-                tracing::debug!("Watcher requests channel closed, stop syncing",);
             }
         }
 
@@ -218,12 +208,15 @@ pub async fn sync_mailbox(
 
         let _ = state_tx.send(EmailQueryState::InProgress);
 
-        if let Err(e) = sync_mailbox_once(repo, account_id, &mailbox_id, jmap_api).await {
-            tracing::error!(?e, "Sync failed");
-            let _ = state_tx.send(EmailQueryState::Error {
-                details: format!("Sync failed: {e:?}"),
-            });
-            continue;
+        match sync_mailbox_once(repo, account_id, &mailbox_id, jmap_api).await {
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!(?e, "Sync failed");
+                let _ = state_tx.send(EmailQueryState::Error {
+                    details: format!("Sync failed: {e:?}"),
+                });
+                continue;
+            }
         }
 
         let _ = state_tx.send(EmailQueryState::UpToDate);
