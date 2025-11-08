@@ -21,6 +21,7 @@ CREATE TABLE mailboxes (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     id TEXT NOT NULL,
     jmap_data TEXT NOT NULL,
+    email_sync_state TEXT,
     PRIMARY KEY (account_id, id)
 );
 CREATE INDEX idx_mailboxes_account_id ON mailboxes(account_id);

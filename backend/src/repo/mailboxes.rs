@@ -97,4 +97,48 @@ impl super::Repository {
         })
         .collect()
     }
+
+    pub async fn get_mailbox_ids(&self, account_id: AccountId) -> anyhow::Result<Vec<String>> {
+        let rows = sqlx::query!("SELECT id FROM mailboxes WHERE account_id = ?", account_id)
+            .fetch_all(self.pool())
+            .await
+            .context("Error querying mailbox IDs")?;
+
+        Ok(rows.into_iter().map(|row| row.id).collect())
+    }
+
+    pub async fn get_mailbox_email_sync_state(
+        &self,
+        account_id: AccountId,
+        mailbox_id: &str,
+    ) -> anyhow::Result<Option<String>> {
+        Ok(sqlx::query!(
+            "SELECT email_sync_state FROM mailboxes WHERE account_id = ? AND id = ?",
+            account_id,
+            mailbox_id
+        )
+        .fetch_optional(self.pool())
+        .await
+        .context("Error querying mailbox email sync state")?
+        .context("Mailbox not found")?
+        .email_sync_state)
+    }
+
+    pub async fn set_mailbox_email_sync_state(
+        &self,
+        account_id: AccountId,
+        mailbox_id: &str,
+        sync_state: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query!(
+            "UPDATE mailboxes SET email_sync_state = ? WHERE account_id = ? AND id = ?",
+            sync_state,
+            account_id,
+            mailbox_id
+        )
+        .execute(self.pool())
+        .await
+        .context("Error updating mailbox email sync state")?;
+        Ok(())
+    }
 }

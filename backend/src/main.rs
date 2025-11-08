@@ -1,6 +1,6 @@
 use crate::api::ApiState;
 use crate::jmap_account::{AccountId, AccountRepositoryExt};
-use crate::jmap_sync::SyncCommand;
+use crate::sync::SyncCommand;
 use anyhow::{Context, format_err};
 use futures::TryFutureExt;
 use futures::future::try_join_all;
@@ -13,11 +13,10 @@ use tokio::try_join;
 use tower_http::cors::{AllowMethods, AllowOrigin, CorsLayer};
 
 mod api;
-mod future_set;
 mod jmap_account;
 mod jmap_api;
-mod jmap_sync;
 mod repo;
+mod sync;
 
 #[tokio::main]
 async fn main() {
@@ -68,7 +67,7 @@ async fn main() {
             .write()
             .insert(account_id, commands_tx);
 
-        jmap_sync::run_jmap_sync(&repo, account_id, commands_rx)
+        sync::run_jmap_sync(&repo, account_id, commands_rx)
     });
 
     let sync_tasks = try_join_all(sync_tasks).map_err(|e| format_err!("Sync task error: {e:?}"));

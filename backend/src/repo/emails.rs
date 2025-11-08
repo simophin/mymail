@@ -73,6 +73,7 @@ impl super::Repository {
             WHERE true
             ON CONFLICT DO UPDATE
                 SET jmap_data = EXCLUDED.jmap_data
+                WHERE subject IS NULL
             ",
             account_id,
             emails_as_json

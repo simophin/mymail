@@ -1,4 +1,5 @@
 use anyhow::Context;
+use derive_more::Debug as DeriveDebug;
 use futures::StreamExt;
 use futures::future::{Either, select};
 use jmap_client::client::Client;
@@ -12,6 +13,7 @@ use jmap_client::core::response::{
 use jmap_client::{DataType, PushObject, email};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::pin::pin;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -34,17 +36,25 @@ pub struct EmailQuery {
     pub mailbox_id: Option<String>,
     pub search_keyword: Option<String>,
     pub sorts: Vec<EmailSort>,
-    pub limit: usize,
+    pub limit: Option<NonZeroUsize>,
 }
 
-#[derive(Debug)]
+#[derive(DeriveDebug)]
 enum JmapRequest {
-    MailboxChanges { since_state: String },
+    MailboxChanges {
+        since_state: String,
+    },
     QueryMailboxes,
     GetMailboxByIds(Vec<String>),
     QueryEmail(EmailQuery),
-    EmailChanges { since_state: String },
-    GetEmailByIds(Vec<String>),
+    EmailChanges {
+        since_state: String,
+    },
+    GetEmailByIds {
+        #[debug(ignore)]
+        ids: Vec<String>,
+        partial_properties: Option<Vec<email::Property>>,
+    },
 }
 
 impl JmapRequest {
@@ -76,7 +86,11 @@ impl JmapRequest {
                 limit,
             }) => {
                 let mut req = client.build();
-                let query = req.query_email().limit(limit).calculate_total(true);
+                let query = req.query_email().calculate_total(true);
+
+                if let Some(limit) = limit {
+                    query.limit(limit.get());
+                }
 
                 // Construct filters
                 let mut filters = Vec::new();
@@ -129,9 +143,15 @@ impl JmapRequest {
                 req
             }
 
-            Self::GetEmailByIds(ids) => {
+            Self::GetEmailByIds {
+                ids,
+                partial_properties,
+            } => {
                 let mut req = client.build();
-                req.get_email().ids(ids);
+                let r = req.get_email().ids(ids);
+                if let Some(props) = partial_properties {
+                    r.properties(props);
+                }
                 req
             }
         }
@@ -295,10 +315,17 @@ impl JmapApi {
     }
 
     #[instrument(skip(self), ret, level = "debug")]
-    pub async fn get_emails(&self, ids: Vec<String>) -> anyhow::Result<EmailGetResponse> {
-        self.send_ws_request(JmapRequest::GetEmailByIds(ids))
-            .await?
-            .unwrap_get_email()
-            .context("Expecting email get response")
+    pub async fn get_emails(
+        &self,
+        ids: Vec<String>,
+        partial_properties: Option<Vec<email::Property>>,
+    ) -> anyhow::Result<EmailGetResponse> {
+        self.send_ws_request(JmapRequest::GetEmailByIds {
+            ids,
+            partial_properties,
+        })
+        .await?
+        .unwrap_get_email()
+        .context("Expecting email get response")
     }
 }

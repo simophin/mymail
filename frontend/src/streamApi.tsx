@@ -1,38 +1,7 @@
-import { Observable } from "rxjs";
+import {Observable, Subject, Subscription} from "rxjs";
 
 
-export function streamApi<T>(request: RequestInfo | URL): Observable<T> {
-    return new Observable<T>((subscriber) => {
-        const controller = new AbortController();
-
-        async function fetchStream() {
-            try {
-                const res = await fetch(request, {
-                    signal: controller.signal,
-                });
-                const reader = res.body!.getReader();
-                const decoder = new TextDecoder();
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    subscriber.next(JSON.parse(decoder.decode(value)));
-                }
-            } catch (error) {
-                subscriber.error(error);
-            }
-        }
-
-        let _ = fetchStream();
-
-        return () => {
-            controller.abort();
-        };
-    });
-}
-
-export function streamWebSocketApi<T>(url: string): Observable<T> {
+export function streamWebSocketApi<T, S = any>(url: string, messageToSend?: Subject<S | undefined>): Observable<T> {
     return new Observable<T>((subscriber) => {
         const ws = new WebSocket(url);
 
@@ -44,7 +13,26 @@ export function streamWebSocketApi<T>(url: string): Observable<T> {
             subscriber.error(event);
         };
 
+        const subscriptions: Subscription[] = [];
+
+        ws.onopen = () => {
+            if (messageToSend) {
+                subscriptions.push(messageToSend.subscribe((message) => {
+                    if (typeof message !== "undefined") {
+                        ws.send(JSON.stringify(message));
+                    }
+                }));
+            }
+        };
+
+        ws.onclose = () => {
+            subscriber.error("WebSocket closed");
+        };
+
         return () => {
+            for (const subscription of subscriptions) {
+                subscription.unsubscribe();
+            }
             ws.close();
         };
     });

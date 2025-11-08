@@ -1,6 +1,6 @@
 import {Observable, Subscription} from "rxjs";
-import {createEffect, createSignal, For, JSX, onCleanup, splitProps} from "solid-js";
-import {createStore} from "solid-js/store";
+import {createEffect, createSignal, For, JSX, onCleanup, Signal, splitProps} from "solid-js";
+import {createStore, Store} from "solid-js/store";
 import {binarySearchBy} from "./binarySearch";
 import {setEquals} from "./sets";
 
@@ -10,12 +10,14 @@ type PageSubscription = {
     limit: number;
 }
 
-type Page<T> = T[];
+export type Page<T> = T[];
 
 export type Props<T> = {
     numPerPage: number,
     watchPage: (offset: number, limit: number) => Observable<T[]>,
     children: (item: T | null) => JSX.Element,
+    watchingPages?: Signal<Set<number>>,
+    pages?: ReturnType<typeof createStore<Page<T>[]>>,
 } & Pick<JSX.HTMLAttributes<HTMLElement>, "class"> & Pick<JSX.HTMLAttributes<HTMLElement>, "style">;
 
 function getOffsetBottom(node: HTMLElement): number {
@@ -45,7 +47,7 @@ function findVisibleChildren(container: HTMLElement): { topChildIndex: number, b
 type PageSubscriptionMap = Map<number, PageSubscription>;
 
 function ensureSubscriptions(
-    [pageSubs, setPageSubs]: ReturnType<typeof createSignal<PageSubscriptionMap>>,
+    [pageSubs, setPageSubs]: Signal<PageSubscriptionMap>,
     ensurePageIndices: Set<number>,
     shouldRecreate: (sub: PageSubscription, pageIndex: number) => boolean,
     createPageSubscription: (pageIndex: number) => PageSubscription) {
@@ -88,7 +90,7 @@ function ensureSubscriptions(
 }
 
 function removePageSubscriptions(
-    [pageSubs, setPageSubs]: ReturnType<typeof createSignal<PageSubscriptionMap>>,
+    [pageSubs, setPageSubs]: Signal<PageSubscriptionMap>,
     predicate: (pageIndex: number) => boolean,
 ) {
     let updatedSubscriptions: PageSubscriptionMap | null = null;
@@ -112,8 +114,8 @@ function removePageSubscriptions(
 export default function LazyLoadingList<T>(props: Props<T>) {
     const [localProps, containerProps] = splitProps(props, ["numPerPage", "watchPage", "children"]);
 
-    const [pages, setPages] = createStore<Page<T>[]>([]);
-    const [watchingPages, setWatchingPages] = createSignal<Set<number>>(new Set([0]));
+    const [pages, setPages] = props.pages ?? createStore<Page<T>[]>([]);
+    const [watchingPages, setWatchingPages] = props.watchingPages ?? createSignal<Set<number>>(new Set([0]));
     const pageSubscriptions = createSignal<PageSubscriptionMap>(new Map());
 
     const handleContainerEvent = (element: HTMLElement) => {

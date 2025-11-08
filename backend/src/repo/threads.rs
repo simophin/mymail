@@ -24,7 +24,7 @@ impl super::Repository {
             r#"
             SELECT
                 thread_id AS "thread_id!",
-                json_group_array(json(jmap_data) ORDER BY received_at, sent_at) AS "emails!: String"
+                json_group_array(json(jmap_data) ORDER BY received_at) AS "emails!: String"
             FROM emails
             WHERE account_id = ?1 AND id IN (
                 SELECT me.email_id FROM mailbox_emails me
