@@ -25,16 +25,18 @@ impl super::Repository {
 
         let r = sqlx::query!(
             r#"
-            SELECT me.account_id,
-                   me.thread_id AS "thread_id!",
-                   me.mailbox_id,
-                   json_group_array(json(e.jmap_data)) as "emails!: String",
-                   MAX(me.received_at)           as last_received_at
-            FROM mailbox_emails me
-            INNER JOIN emails e ON e.account_id = me.account_id AND e.id = me.email_id
-            GROUP BY me.account_id, me.mailbox_id, me.thread_id
-            ORDER BY last_received_at DESC
-            LIMIT ?3, ?4
+           WITH threads AS (
+                SELECT thread_id, MAX(received_at) AS last_received_at, json_group_array(email_id) AS email_ids
+                FROM mailbox_emails
+                WHERE account_id = ?1 AND mailbox_id = ?2
+                GROUP BY thread_id
+                ORDER BY last_received_at DESC, thread_id
+                LIMIT ?3, ?4
+            )
+            SELECT thread_id,
+                     (SELECT json_group_array(json(e.jmap_data)) FROM emails e WHERE e.account_id = ?1 AND e.id IN (SELECT value FROM json_each(email_ids))) AS "emails!: String"
+            FROM threads
+            ORDER BY last_received_at DESC, thread_id
             "#,
             account_id,
             mailbox_id,

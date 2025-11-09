@@ -5,7 +5,7 @@ mod threads;
 use anyhow::Context;
 use sqlx::SqlitePool;
 use sqlx::migrate::Migrator;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteQueryResult};
+use sqlx::sqlite::{SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqliteQueryResult};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -28,6 +28,8 @@ impl Repository {
         let pool = SqlitePool::connect_with(
             SqliteConnectOptions::new()
                 .filename(database_file)
+                .journal_mode(SqliteJournalMode::Wal)
+                .auto_vacuum(SqliteAutoVacuum::Incremental)
                 .create_if_missing(true),
         )
         .await

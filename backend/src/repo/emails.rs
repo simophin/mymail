@@ -62,8 +62,6 @@ impl super::Repository {
         account_id: AccountId,
         emails: &[Email],
     ) -> anyhow::Result<()> {
-        let mut tx = self.pool().begin().await?;
-
         let emails_as_json = serde_json::to_string(emails).context("Error serializing emails")?;
         let mut changes = 0;
 
@@ -78,44 +76,10 @@ impl super::Repository {
             account_id,
             emails_as_json
         )
-        .execute(&mut *tx)
+        .execute(self.pool())
         .await
         .context("Error updating emails")?
         .rows_affected();
-
-        changes += sqlx::query!(
-            "INSERT OR IGNORE INTO mailbox_emails (account_id, mailbox_id, email_id, thread_id, received_at)
-            SELECT ?, mb.key, ea.value->>'$.id', ea.value->>'$.threadId', ea.value->>'$.receivedAt'
-            FROM json_each(?) AS ea,
-                 json_each(ea.value->'$.mailboxIds') AS mb
-            WHERE mb.value == true",
-            account_id,
-            emails_as_json
-        )
-        .execute(&mut *tx)
-        .await
-        .context("Error updating mailbox_emails")?
-        .rows_affected();
-
-        changes += sqlx::query!(
-            "DELETE FROM mailbox_emails WHERE
-                               (account_id, email_id) IN (SELECT ?1, value->>'$.id' FROM json_each(?2)) AND
-                               (account_id, mailbox_id, email_id) NOT IN (
-                                    SELECT ?1, mb.key, ea.value->>'$.id'
-                                    FROM json_each(?2) ea,
-                                        json_each(ea.value->'$.mailboxIds') AS mb
-                                    WHERE mb.value == true
-                                )
-            ",
-            account_id,
-            emails_as_json
-        )
-            .execute(&mut *tx)
-            .await
-            .context("Error cleaning up mailbox_emails")?
-            .rows_affected();
-
-        tx.commit().await?;
 
         if changes > 0 {
             self.notify_changes(&["emails", "mailbox_emails"]);
