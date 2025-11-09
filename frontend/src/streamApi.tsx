@@ -1,4 +1,5 @@
 import {Observable, Subject, Subscription} from "rxjs";
+import {Accessor, createEffect, createSignal, onCleanup, Signal} from "solid-js";
 
 
 export function streamWebSocketApi<T, S = any>(url: string, messageToSend?: Subject<S | undefined>): Observable<T> {
@@ -38,4 +39,28 @@ export function streamWebSocketApi<T, S = any>(url: string, messageToSend?: Subj
             ws.close();
         };
     });
+}
+
+
+export function createWebSocketResource<T>(initial: T, factory: () => WebSocket): Accessor<T> {
+    const [data, setData] = createSignal<T>(initial);
+    const [reloadSeq, setReloadSeq] = createSignal(0);
+
+    createEffect(() => {
+        const ws = factory();
+        let _ = reloadSeq();
+
+        ws.onmessage = (event) => {
+            setData(JSON.parse(event.data));
+        };
+
+        ws.onerror = (event) => {
+            console.error("WebSocket error", event);
+            setTimeout(() => setReloadSeq((n) => n + 1), 1000);
+        };
+
+        onCleanup(() => ws.close());
+    });
+
+    return data;
 }

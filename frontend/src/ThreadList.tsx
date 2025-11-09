@@ -5,7 +5,7 @@ import {streamWebSocketApi} from "./streamApi";
 import * as rx from "rxjs";
 import {BehaviorSubject, retry, Subject, Subscription} from "rxjs";
 
-const apiUrl = import.meta.env.VITE_BASE_URL;
+const apiUrl: string = import.meta.env.VITE_BASE_URL;
 
 export type EmailSort = {
     column: 'Date';
