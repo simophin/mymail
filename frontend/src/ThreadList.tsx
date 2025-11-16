@@ -1,9 +1,13 @@
-import {createStore} from "solid-js/store";
 import LazyLoadingList, {Page, Props as ListProps} from "./LazyLoadingList";
-import {createEffect, createSignal, onCleanup, onMount, splitProps, untrack} from "solid-js";
+import {createEffect, createSignal, onCleanup, splitProps, untrack} from "solid-js";
 import {streamWebSocketApi} from "./streamApi";
-import * as rx from "rxjs";
-import {BehaviorSubject, retry, Subject, Subscription} from "rxjs";
+import {BehaviorSubject, filter, map, retry} from "rxjs";
+import {List as ImmutableList, Set as ImmutableSet} from "immutable";
+import * as zod from "zod";
+
+import {log as parentLog} from "./log";
+
+const log = parentLog.child({"component": "ThreadList"});
 
 const apiUrl: string = import.meta.env.VITE_BASE_URL;
 
@@ -19,16 +23,19 @@ export type ThreadQuery = {
 
 export type AccountId = number;
 
-export type Email = {
-    id: string;
-    subject: string;
-    receivedAt: string
-}
+const EmailSchema = zod.object({
+    id: zod.string(),
+    subject: zod.string(),
+    receivedAt: zod.string(),
+});
 
-export type Thread = {
-    id: string;
-    emails: Email[];
-}
+const ThreadSchema = zod.object({
+    id: zod.string(),
+    emails: zod.array(EmailSchema),
+});
+
+export type Email = zod.infer<typeof EmailSchema>;
+export type Thread = zod.infer<typeof ThreadSchema>;
 
 type EmailQuery = {
     anchor_id?: string,
@@ -43,23 +50,30 @@ export default function ThreadList(props: {
     query: ThreadQuery,
 } & Pick<ListProps<Thread>, "style"> & Pick<ListProps<Thread>, "class">) {
     const [localProps, listProps] = splitProps(props, ["query"]);
-    const watchingPages = createSignal(new Set<number>([0]));
+    const watchingPages = createSignal(ImmutableSet([0]));
     const watchPage = (offset: number, limit: number) => {
-        return streamWebSocketApi<Thread[]>(`${apiUrl}/threads/${localProps.query.accountId}?mailbox_id=${localProps.query.mailboxId}&offset=${offset}&limit=${limit}`)
+        return streamWebSocketApi(
+            `${apiUrl}/threads/${localProps.query.accountId}?mailbox_id=${localProps.query.mailboxId}&offset=${offset}&limit=${limit}`,
+            zod.array(ThreadSchema)
+        )
             .pipe(
-                retry({ count: Infinity, delay: 1000 })
+                retry({ count: Infinity, delay: 1000 }),
+                filter((v) => !!v.lastValue),
+                map((v) => v.lastValue!)
             )
     };
-    const pageStore = createStore<Page<Thread>[]>([]);
+    const pages = createSignal(ImmutableList<Page<Thread>>([]));
     const numPerPage = 100;
 
     const emailSyncQuery = new BehaviorSubject<EmailQuery | undefined>(undefined)
 
     createEffect(() => {
-        const sub = streamWebSocketApi<EmailSyncState>(`${apiUrl}/mailboxes/sync/${localProps.query.accountId}/${localProps.query.mailboxId}`, emailSyncQuery)
+        const sub = streamWebSocketApi<EmailSyncState>(`${apiUrl}/mailboxes/sync/${localProps.query.accountId}/${localProps.query.mailboxId}`,
+            zod.object(),
+            emailSyncQuery)
             .pipe(retry({ count: Infinity, delay: 1000 }))
             .subscribe((syncState) => {
-                console.log("Email sync state", syncState);
+                log.info({syncState}, "Got new email sync state");
             });
 
         onCleanup(() => sub.unsubscribe());
@@ -82,12 +96,15 @@ export default function ThreadList(props: {
             return;
         }
 
-        let anchor_id: string | undefined = undefined;
+        let anchor_id: string | undefined;
         let limit: number;
-        const pages = untrack(() => pageStore[0]);
-        anchor_id = last(pages?.at(minPage)?.at(0)?.emails)?.id;
+        const p = untrack(() => (pages[0])().toArray());
+        anchor_id = last(p.at(minPage)?.at(0)?.emails)?.id;
 
-        console.log("Watching offset", minPage * numPerPage, "to", (maxPage + 1) * numPerPage);
+        log.info({
+            from: minPage * numPerPage,
+            to: (maxPage + 1) * numPerPage,
+        }, "Watching offset");
         emailSyncQuery.next({
             anchor_id,
             mailbox_id: localProps.query.mailboxId,
@@ -100,10 +117,14 @@ export default function ThreadList(props: {
         {...listProps}
         numPerPage={numPerPage}
         watchPage={watchPage}
-        pages={pageStore}
+        class="list h-full overflow-y-scroll"
+        pages={pages}
+        deps={[localProps.query.accountId, localProps.query.mailboxId]}
         watchingPages={watchingPages}>
         {(thread) => (
-            <div>{thread?.emails?.at(0)?.subject}</div>
+            <div class="list-row cursor-pointer hover:bg-base-200" role="link">
+                {thread?.emails?.at(0)?.subject}
+            </div>
         )}
     </LazyLoadingList>;
 }

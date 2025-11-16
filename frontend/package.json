@@ -25,7 +25,12 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.16",
+    "heroicons": "^2.2.0",
+    "immutable": "^5.1.4",
+    "pino": "^10.1.0",
     "rxjs": "^7.8.2",
-    "solid-js": "^1.9.5"
+    "solid-fontawesome": "^0.2.1",
+    "solid-js": "^1.9.5",
+    "zod": "^4.1.12"
   }
 }

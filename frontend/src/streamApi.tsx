@@ -1,5 +1,7 @@
-import {map, Observable, repeat, scan, Subject, Subscription} from "rxjs";
-import {Accessor, createEffect, createSignal, onCleanup, Signal} from "solid-js";
+import {Observable, repeat, scan, Subject, Subscription} from "rxjs";
+import {createEffect, createSignal, onCleanup} from "solid-js";
+import {log as parentLog} from "./log";
+import * as zod from "zod";
 
 export type WebSocketState<T> = {
     state: "connecting" | "open" | "closed",
@@ -10,8 +12,12 @@ export type WebSocketState<T> = {
     error: any,
 };
 
-export function streamWebSocketApi<T, S = any>(url: string, messageToSend?: Subject<S | undefined>) {
+export function streamWebSocketApi<T, S = any>(url: string,
+                                               schema: zod.Schema<T>,
+                                               messageToSend?: Subject<S | undefined>) {
     return new Observable<WebSocketState<T>>((subscriber) => {
+        const log = parentLog.child({"component": "streamWebSocketApi", url});
+        log.debug("Creating WebSocket connection");
         const ws = new WebSocket(url);
 
         subscriber.next({
@@ -19,7 +25,7 @@ export function streamWebSocketApi<T, S = any>(url: string, messageToSend?: Subj
         });
 
         ws.onmessage = (event) => {
-            let value = JSON.parse(event.data);
+            const value = schema.parse(JSON.parse(event.data));
             subscriber.next({
                 state: "open",
                 lastValue: value,
@@ -27,6 +33,7 @@ export function streamWebSocketApi<T, S = any>(url: string, messageToSend?: Subj
         };
 
         ws.onerror = (event) => {
+            log.debug({event}, "WebSocket error");
             subscriber.next({
                 state: "error",
                 error: event.type,
@@ -37,6 +44,7 @@ export function streamWebSocketApi<T, S = any>(url: string, messageToSend?: Subj
         const subscriptions: Subscription[] = [];
 
         ws.onopen = () => {
+            log.debug("WebSocket opened");
             subscriber.next({"state": "open"});
 
             if (messageToSend) {
@@ -56,7 +64,9 @@ export function streamWebSocketApi<T, S = any>(url: string, messageToSend?: Subj
             for (const subscription of subscriptions) {
                 subscription.unsubscribe();
             }
-            ws.close();
+
+            log.info("Closing WebSocket");
+            ws.close(1000);
         };
     }).pipe(
         repeat({
@@ -85,7 +95,6 @@ export function createWebSocketResource<T>(initial: T, factory: () => WebSocket)
         };
 
         ws.onerror = (event) => {
-            console.error("WebSocket error", event);
             setTimeout(() => setReloadSeq((n) => n + 1), 1000);
         };
 
