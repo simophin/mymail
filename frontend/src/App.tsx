@@ -1,4 +1,4 @@
-import {Component, createSignal, Show} from 'solid-js';
+import { Component, createSignal, Show } from 'solid-js';
 import ThreadList from "./ThreadList";
 import MailboxList from "./MailboxList";
 
@@ -12,12 +12,13 @@ const App: Component = () => {
                 selectedMailboxId={selectedMailboxId()}
                 onMailboxSelected={setSelectedMailboxId}
                 accountId="1"
-                class="w-1/5 h-full overflow-y-scroll"/>
+                class="menu max-w-1/4 h-full overflow-auto flex flex-col" />
+
 
             <Show when={selectedMailboxId()}>
                 <ThreadList
-                    query={{accountId: 1, mailboxId: selectedMailboxId()!}}
-                    class="h-screen flex-1 overflow-y-scroll"/>
+                    query={{ accountId: 1, mailboxId: selectedMailboxId()! }}
+                    class="h-screen flex-1 overflow-y-scroll" />
             </Show>
 
         </div>

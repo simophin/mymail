@@ -112,7 +112,7 @@ function removePageSubscriptions(
 }
 
 export default function LazyLoadingList<T>(props: Props<T>) {
-    const [localProps, containerProps] = splitProps(props, ["numPerPage", "watchPage", "children"]);
+    const [localProps, containerProps] = splitProps(props, ["numPerPage", "watchPage", "children", "pages", "watchingPages"]);
 
     const [pages, setPages] = props.pages ?? createStore<Page<T>[]>([]);
     const [watchingPages, setWatchingPages] = props.watchingPages ?? createSignal<Set<number>>(new Set([0]));
