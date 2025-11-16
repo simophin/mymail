@@ -25,8 +25,9 @@ export type AccountId = number;
 
 const EmailSchema = zod.object({
     id: zod.string(),
-    subject: zod.string(),
+    subject: zod.string().optional(),
     receivedAt: zod.string(),
+    preview: zod.string().optional(),
 });
 
 const ThreadSchema = zod.object({
@@ -48,7 +49,7 @@ type EmailSyncState = {};
 
 export default function ThreadList(props: {
     query: ThreadQuery,
-} & Pick<ListProps<Thread>, "style"> & Pick<ListProps<Thread>, "class">) {
+}) {
     const [localProps, listProps] = splitProps(props, ["query"]);
     const watchingPages = createSignal(ImmutableSet([0]));
     const watchPage = (offset: number, limit: number) => {
@@ -66,6 +67,7 @@ export default function ThreadList(props: {
     const numPerPage = 100;
 
     const emailSyncQuery = new BehaviorSubject<EmailQuery | undefined>(undefined)
+    const [selectedThreadId, setSelectedThreadId] = createSignal<string | null>(null);
 
     createEffect(() => {
         const sub = streamWebSocketApi<EmailSyncState>(`${apiUrl}/mailboxes/sync/${localProps.query.accountId}/${localProps.query.mailboxId}`,
@@ -113,18 +115,28 @@ export default function ThreadList(props: {
         })
     });
 
+    const onThreadItemClick = (evt: Event) => {
+        const ele = evt.currentTarget as HTMLElement;
+        log.info({id: ele.dataset.id}, "Thread item clicked");
+        setSelectedThreadId(ele.dataset.id || null);
+    };
+
     return <LazyLoadingList
         {...listProps}
         numPerPage={numPerPage}
         watchPage={watchPage}
-        class="list h-full overflow-y-scroll"
+        class={`list w-full h-full overflow-y-scroll`}
         pages={pages}
         deps={[localProps.query.accountId, localProps.query.mailboxId]}
         watchingPages={watchingPages}>
         {(thread) => (
-            <div class="list-row cursor-pointer hover:bg-base-200" role="link">
-                {thread?.emails?.at(0)?.subject}
-            </div>
+            <li class={`list-row hover:bg-base-200 cursor-pointer prose ${(selectedThreadId() && selectedThreadId() == thread?.id) ? 'bg-base-200' : ''}`}
+                data-id={thread?.id}
+                onClick={onThreadItemClick}
+                role="link">
+                <h4 class="list-col-grow">{thread?.emails?.at(0)?.subject}</h4>
+                <small class="list-col-wrap line-clamp-2">{thread?.emails?.at(0)?.preview}</small>
+            </li>
         )}
     </LazyLoadingList>;
 }

@@ -24,6 +24,7 @@
     "vite-plugin-solid": "^2.11.8"
   },
   "dependencies": {
+    "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.16",
     "heroicons": "^2.2.0",
     "immutable": "^5.1.4",

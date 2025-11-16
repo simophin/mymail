@@ -20,14 +20,8 @@ export type Props<T> = {
     watchingPages?: Signal<ImmutableSet<number>>,
     pages?: Signal<ImmutableList<Page<T>>>,
     deps?: any[],
-} & Pick<JSX.HTMLAttributes<HTMLElement>, "class"> & Pick<JSX.HTMLAttributes<HTMLElement>, "style">;
-
-function shouldCreateNewSub(
-    existingSub: PageSubscription | undefined,
-    deps: ImmutableList<any>,
-) {
-    return existingSub === undefined || !existingSub.deps.equals(deps);
-}
+    class?: string,
+};
 
 export default function LazyLoadingList<T>(props: Props<T>) {
     const [localProps, containerProps] = splitProps(props, ["numPerPage", "watchPage", "children", "pages", "watchingPages", "deps"]);
@@ -132,7 +126,7 @@ export default function LazyLoadingList<T>(props: Props<T>) {
         }
     });
 
-    const container = <div {...containerProps}
+    const container = <ul {...containerProps}
                            onScroll={(d) => handleContainerEvent(d.currentTarget as HTMLElement)}>
         <For each={pages().toArray()}>
             {(page) => (
@@ -143,7 +137,7 @@ export default function LazyLoadingList<T>(props: Props<T>) {
                 </For>
             )}
         </For>
-    </div> as HTMLElement;
+    </ul> as HTMLElement;
 
     createEffect(() => {
         const observer = new ResizeObserver(() => {

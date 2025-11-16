@@ -29,7 +29,7 @@ type Props = {
 } & JSX.HTMLAttributes<HTMLUListElement>;
 
 export default function MailboxList(props: Props) {
-    const [localProps, listProps] = splitProps(props, ["accountId"]);
+    const [localProps, listProps] = splitProps(props, ["accountId", "selectedMailboxId"]);
 
     const mailboxes = createSignalFromObservableNoError(() => streamWebSocketApi(
         `${apiUrl}/mailboxes/${localProps.accountId}`,

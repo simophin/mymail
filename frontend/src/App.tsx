@@ -12,13 +12,14 @@ const App: Component = () => {
                 selectedMailboxId={selectedMailboxId()}
                 onMailboxSelected={setSelectedMailboxId}
                 accountId="1"
-                class="menu max-w-1/4 h-full overflow-auto flex flex-col" />
+                class="menu w-1/6 h-full overflow-auto flex flex-col" />
 
 
             <Show when={selectedMailboxId()}>
+                <div class="h-full w-1/4 overflow-hidden">
                 <ThreadList
-                    query={{ accountId: 1, mailboxId: selectedMailboxId()! }}
-                    class="h-screen flex-1 overflow-y-scroll" />
+                    query={{ accountId: 1, mailboxId: selectedMailboxId()! }} />
+                </div>
             </Show>
 
         </div>
