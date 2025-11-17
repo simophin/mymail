@@ -1,6 +1,6 @@
 import {For, JSX, Match, Show, splitProps} from "solid-js";
-import {streamWebSocketApi} from "./streamApi";
-import {createSignalFromObservableNoError} from "./observables";
+import {streamWebSocketApi} from "../streamApi";
+import {createSignalFromObservableNoError} from "../observables";
 import * as zod from "zod";
 import InboxIcon from "heroicons/24/outline/inbox.svg?raw";
 import PaperPlaneIcon from "heroicons/24/outline/paper-airplane.svg?raw";

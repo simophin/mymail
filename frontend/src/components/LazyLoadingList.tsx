@@ -1,8 +1,8 @@
 import {Observable, Subscription} from "rxjs";
 import {createEffect, createSignal, For, JSX, onCleanup, Signal, splitProps, untrack} from "solid-js";
-import {binarySearchBy} from "./binarySearch";
+import {binarySearchBy} from "../binarySearch";
 import {Map as ImmutableMap, Set as ImmutableSet, List as ImmutableList} from "immutable";
-import {log as parentLog} from "./log";
+import {log as parentLog} from "../log";
 
 const log = parentLog.child({"component": "LazyLoadingList"});
 
@@ -157,7 +157,7 @@ function getOffsetBottom(node: HTMLElement): number {
 
 function findVisibleChildren(container: HTMLElement): { topChildIndex: number, bottomChildIndex: number } | undefined {
     const scrollY = container.scrollTop;
-    const containerHeight = container.clientHeight;
+    const containerHeight = Math.min(container.clientHeight, window.innerHeight);
 
     if (container.childNodes.length === 0) {
         return;
