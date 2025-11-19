@@ -944,6 +944,16 @@
     "@solid-primitives/static-store" "^0.1.2"
     "@solid-primitives/utils" "^6.3.2"
 
+"@solid-primitives/media@^2.3.3":
+  version "2.3.3"
+  resolved "https://registry.yarnpkg.com/@solid-primitives/media/-/media-2.3.3.tgz#74d669b6814c30a8308a468cfd7412133ea7d16e"
+  integrity sha512-hQ4hLOGvfbugQi5Eu1BFWAIJGIAzztq9x0h02xgBGl2l0Jaa3h7tg6bz5tV1NSuNYVGio4rPoa7zVQQLkkx9dA==
+  dependencies:
+    "@solid-primitives/event-listener" "^2.4.3"
+    "@solid-primitives/rootless" "^1.5.2"
+    "@solid-primitives/static-store" "^0.1.2"
+    "@solid-primitives/utils" "^6.3.2"
+
 "@solid-primitives/refs@^1.1.1":
   version "1.1.2"
   resolved "https://registry.npmjs.org/@solid-primitives/refs/-/refs-1.1.2.tgz"

@@ -1,6 +1,4 @@
-import {For, JSX, Match, Show, splitProps} from "solid-js";
-import {streamWebSocketApi} from "../streamApi";
-import {createSignalFromObservableNoError} from "../observables";
+import {For, JSX, Show, splitProps} from "solid-js";
 import * as zod from "zod";
 import InboxIcon from "heroicons/24/outline/inbox.svg?raw";
 import PaperPlaneIcon from "heroicons/24/outline/paper-airplane.svg?raw";
@@ -8,9 +6,7 @@ import FolderIcon from "heroicons/24/outline/folder.svg?raw"
 import TrashIcon from "heroicons/24/outline/trash.svg?raw";
 import FileIcon from "heroicons/24/outline/document.svg?raw";
 
-const apiUrl: string = import.meta.env.VITE_BASE_URL;
-
-const MailboxSchema = zod.object({
+export const MailboxSchema = zod.object({
     id: zod.string(),
     name: zod.string(),
     role: zod.enum(["inbox", "sent", "drafts", "sent", "junk", "trash", "templates", "outbox", "scheduled"])
@@ -20,35 +16,25 @@ const MailboxSchema = zod.object({
     parentId: zod.string().nullable().optional(),
 })
 
-type Mailbox = zod.infer<typeof MailboxSchema>;
+export type Mailbox = zod.infer<typeof MailboxSchema>;
 
 type Props = {
     accountId: string;
+    mailboxes: Mailbox[];
     selectedMailboxId?: string;
     onMailboxSelected?: (mailboxId: string) => void;
 } & JSX.HTMLAttributes<HTMLUListElement>;
 
 export default function MailboxList(props: Props) {
-    const [localProps, listProps] = splitProps(props, ["accountId", "selectedMailboxId"]);
-
-    const mailboxes = createSignalFromObservableNoError(() => streamWebSocketApi(
-        `${apiUrl}/mailboxes/${localProps.accountId}`,
-        zod.array(MailboxSchema),
-    ), {
-        state: "connecting",
-    });
+    const [localProps, listProps] = splitProps(props, ["accountId", "selectedMailboxId", "mailboxes", "onMailboxSelected"]);
 
     const sortedMailboxes = () => {
-        if (mailboxes().lastValue) {
-            return collapseMailboxes(mailboxes().lastValue!, null);
-        }
-
-        return null;
+        return collapseMailboxes(localProps.mailboxes, null);
     };
 
-    const onItemClick = props.onMailboxSelected ? (evt: Event) => {
+    const onItemClick = localProps.onMailboxSelected ? (evt: Event) => {
         const ele = evt.currentTarget as HTMLElement;
-        props.onMailboxSelected?.(ele.dataset.id as string);
+        localProps.onMailboxSelected?.(ele.dataset.id as string);
     } : undefined;
 
     return <Show when={sortedMailboxes()} fallback={<p>Loading...</p>}>
@@ -57,7 +43,7 @@ export default function MailboxList(props: Props) {
                 {(mailbox) => <MailboxItem
                     mailbox={mailbox}
                     onItemClick={onItemClick}
-                    selectedMailboxId={props.selectedMailboxId}/>}
+                    selectedMailboxId={localProps.selectedMailboxId}/>}
             </For>
         </ul>
     </Show>

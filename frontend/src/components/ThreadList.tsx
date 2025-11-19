@@ -51,6 +51,7 @@ export default function ThreadList(props: {
     query: ThreadQuery,
     selectedThreadId?: string,
     onThreadSelected?: (threadId: string) => void,
+    class?: string,
 }) {
     const watchingPages = createSignal(ImmutableSet([0]));
     const watchPage = (offset: number, limit: number) => {
@@ -124,7 +125,7 @@ export default function ThreadList(props: {
     return <LazyLoadingList
         numPerPage={numPerPage}
         watchPage={watchPage}
-        class={`list w-full h-full overflow-y-scroll`}
+        class={`${props.class} list w-full h-full overflow-y-scroll`}
         pages={pages}
         deps={[props.query.accountId, props.query.mailboxId]}
         watchingPages={watchingPages}>
