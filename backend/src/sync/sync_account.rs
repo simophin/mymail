@@ -28,11 +28,11 @@ pub async fn sync_account(
 
     let mut join_set = JoinSet::new();
 
-    join_set.spawn({
-        let jmap_api = jmap_api.clone();
-        let repo = repo.clone();
-        async move { sync_mailbox_list::sync_mailbox_list(&repo, account_id, &jmap_api).await }
-    });
+    join_set.spawn(sync_mailbox_list::sync_mailbox_list(
+        repo.clone(),
+        account_id,
+        jmap_api.clone(),
+    ));
 
     join_set.spawn(sync_mailboxes::sync_mailboxes(
         repo.clone(),

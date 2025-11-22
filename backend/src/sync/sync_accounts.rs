@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
-use tracing::instrument;
+use tracing::{Instrument, info_span, instrument};
 
 #[instrument(skip_all, ret, level = "info")]
 pub async fn sync_accounts(
@@ -61,12 +61,15 @@ pub async fn sync_accounts(
 
                 let (command_sender, command_receiver) = mpsc::channel(16);
 
-                join_set.spawn(super::sync_account::sync_account(
-                    repo.clone(),
-                    account_id,
-                    jmap_api.clone(),
-                    command_receiver,
-                ));
+                join_set.spawn(
+                    super::sync_account::sync_account(
+                        repo.clone(),
+                        account_id,
+                        jmap_api.clone(),
+                        command_receiver,
+                    )
+                    .instrument(info_span!("sync_account")),
+                );
 
                 states.insert(
                     account_id,

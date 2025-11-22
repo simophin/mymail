@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 use tokio::time::sleep_until;
-use tracing::instrument;
+use tracing::{Instrument, instrument};
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -88,6 +88,8 @@ impl JmapApi {
         // Establish initial connection
         tasks.spawn({
             let mut network_availability = network_availability.clone();
+            let span = tracing::info_span!("jmap_connect", server_url = server_url.as_str());
+
             async move {
                 while network_availability.wait_for(|a| a.online).await.is_ok() {
                     let delay_connect_until = {
@@ -110,7 +112,7 @@ impl JmapApi {
                         let client = ClientBuilder::new()
                             .credentials(credentials.clone())
                             .follow_redirects([server_url.host_str().unwrap_or_default()])
-                            .connect(server_url.as_str())
+                            .connect(server_url.as_str().trim_end_matches('/'))
                             .await
                             .context("Failed to connect to JMAP server")?;
 
@@ -141,6 +143,7 @@ impl JmapApi {
                         }
 
                         Err(e) => {
+                            tracing::error!(?e, "Failed to connect");
                             let _ = client_state_tx.send(ClientState::Disconnected {
                                 last_error: Some(e),
                                 delay_connect_until: Some(Instant::now() + Duration::from_secs(10)),
@@ -222,6 +225,7 @@ impl JmapApi {
                     }
                 }
             }
+            .instrument(span)
         });
 
         Self {

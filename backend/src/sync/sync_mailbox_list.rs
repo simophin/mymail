@@ -3,13 +3,14 @@ use crate::jmap_api::JmapApi;
 use crate::repo::Repository;
 use anyhow::Context;
 use jmap_client::{DataType, PushObject};
+use std::sync::Arc;
 use tracing::instrument;
 
 #[instrument(skip(repo, jmap_api), ret, level = "info")]
 pub async fn sync_mailbox_list(
-    repo: &Repository,
+    repo: Arc<Repository>,
     account_id: AccountId,
-    jmap_api: &JmapApi,
+    jmap_api: Arc<JmapApi>,
 ) -> anyhow::Result<()> {
     let mut push_sub = jmap_api.subscribe_pushes();
     loop {
