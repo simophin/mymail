@@ -1,11 +1,14 @@
-import {Component, createSignal, Show} from 'solid-js';
-import ThreadList from "./ThreadList";
+import {Component, createMemo, createSignal, Show} from 'solid-js';
+import ThreadList, {Thread} from "./ThreadList";
 import MailboxList, {MailboxSchema} from "./MailboxList";
 import {useNavigate, useSearchParams} from "@solidjs/router";
 import HamburgerIcon from "heroicons/24/outline/bars-3.svg?raw";
 import {createSignalFromObservableNoError} from "../observables";
 import { streamWebSocketApi } from "../streamApi";
 import * as zod from "zod";
+import {List as ImmutableList} from "immutable";
+import {Page} from "./LazyLoadingList";
+import ThreadDetails from "./ThreadDetails";
 
 const apiUrl: string = import.meta.env.VITE_BASE_URL;
 
@@ -28,10 +31,30 @@ export default function Home() {
         state: "connecting",
     });
 
-    const selectedMailboxName = () => {
-        const mailbox = mailboxes().lastValue?.find(mb => mb.id === props.mailboxId);
-        return mailbox?.name;
-    }
+    const threadListPages = createSignal(ImmutableList<Page<Thread>>());
+
+    const selectedMailbox = createMemo(() => {
+        const list = mailboxes().lastValue;
+        if (!list) {
+            return undefined;
+        }
+
+        if (props.mailboxId) {
+            return list.find(mb => mb.id === props.mailboxId);
+        }
+
+        return list.find(mb => mb.role == "inbox");
+    });
+
+    const selectedThread = createMemo(() => {
+        for (const page of (threadListPages[0])()) {
+            for (const thread of page) {
+                if (thread.id === props.threadId) {
+                    return thread;
+                }
+            }
+        }
+    });
 
     return (
         <div class="drawer md:drawer-open overflow-hidden w-screen h-screen">
@@ -39,7 +62,7 @@ export default function Home() {
             <div class="drawer-side">
                 <label for="my-drawer" class="drawer-overlay" aria-label="close sidebar"/>
                 <MailboxList
-                    selectedMailboxId={props.mailboxId}
+                    selectedMailboxId={selectedMailbox()?.id}
                     mailboxes={mailboxes().lastValue ?? []}
                     onMailboxSelected={(id) => {
                         navigator(`/?mailboxId=${id}`, { replace: true });
@@ -51,7 +74,7 @@ export default function Home() {
 
 
             <div class="drawer-content md:flex relative w-full h-full overflow-hidden">
-                <Show when={!!props.mailboxId} fallback={"Select a mailbox"}>
+                <Show when={!!selectedMailbox()} fallback={"Select a mailbox"}>
                     <div class="h-full w-full md:w-80 absolute md:static overflow-hidden flex flex-col">
                         <div class="flex-none navbar bg-base-100 shadow-sm md:hidden">
                             <label for="my-drawer" class="flex-none btn btn-ghost">
@@ -59,16 +82,23 @@ export default function Home() {
                             </label>
 
                             <div class="flex-1">
-                                <a class="btn btn-ghost text-xl">{selectedMailboxName()}</a>
+                                <a class="btn btn-ghost text-xl">{selectedMailbox()?.name}</a>
                             </div>
                         </div>
                         <ThreadList
                             selectedThreadId={props.threadId}
+                            pages={threadListPages}
                             onThreadSelected={(id) => {
-                                navigator(`/?mailboxId=${props.mailboxId}&threadId=${id}`, { replace: true });
+                                navigator(`/?mailboxId=${selectedMailbox()!.id}&threadId=${id}`, { replace: true });
                             }}
                             class="flex-1"
-                            query={{accountId: 1, mailboxId: props.mailboxId!}}/>
+                            query={{accountId: 1, mailboxId: selectedMailbox()!.id}}/>
+                    </div>
+                </Show>
+
+                <Show when={!!selectedThread()}>
+                    <div class="h-full w-full md:flex-1 absolute md:static overflow-hidden">
+                        <ThreadDetails thread={selectedThread()!} class="h-full w-full"/>
                     </div>
                 </Show>
             </div>

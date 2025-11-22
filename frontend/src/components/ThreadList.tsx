@@ -1,11 +1,12 @@
 import LazyLoadingList, {Page, Props as ListProps} from "./LazyLoadingList";
-import {createEffect, createSignal, onCleanup, splitProps, untrack} from "solid-js";
+import {createEffect, createSignal, onCleanup, Signal, splitProps, untrack} from "solid-js";
 import {streamWebSocketApi} from "../streamApi";
 import {BehaviorSubject, filter, map, retry} from "rxjs";
 import {List as ImmutableList, Set as ImmutableSet} from "immutable";
 import * as zod from "zod";
 
 import {log as parentLog} from "../log";
+import {createSignalFromObservable} from "../observables";
 
 const log = parentLog.child({"component": "ThreadList"});
 
@@ -23,11 +24,14 @@ export type ThreadQuery = {
 
 export type AccountId = number;
 
+const BodyValueSchema = zod.object({});
+
 const EmailSchema = zod.object({
     id: zod.string(),
     subject: zod.string().optional(),
     receivedAt: zod.string(),
     preview: zod.string().optional(),
+    bodyValues: zod.record(zod.string(), BodyValueSchema).optional(),
 });
 
 const ThreadSchema = zod.object({
@@ -52,6 +56,7 @@ export default function ThreadList(props: {
     selectedThreadId?: string,
     onThreadSelected?: (threadId: string) => void,
     class?: string,
+    pages?: Signal<ImmutableList<Page<Thread>>>,
 }) {
     const watchingPages = createSignal(ImmutableSet([0]));
     const watchPage = (offset: number, limit: number) => {
@@ -65,7 +70,7 @@ export default function ThreadList(props: {
                 map((v) => v.lastValue!)
             )
     };
-    const pages = createSignal(ImmutableList<Page<Thread>>([]));
+    const pages = props.pages ?? createSignal(ImmutableList<Page<Thread>>([]));
     const numPerPage = 100;
 
     const emailSyncQuery = new BehaviorSubject<EmailQuery | undefined>(undefined)
@@ -100,7 +105,6 @@ export default function ThreadList(props: {
         }
 
         let anchor_id: string | undefined;
-        let limit: number;
         const p = untrack(() => (pages[0])().toArray());
         anchor_id = last(p.at(minPage)?.at(0)?.emails)?.id;
 

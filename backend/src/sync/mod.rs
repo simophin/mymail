@@ -1,3 +1,4 @@
+mod fetch_email_details;
 mod sync_account;
 mod sync_emails;
 mod sync_mailbox;
@@ -18,6 +19,7 @@ use tokio::{select, try_join};
 use tracing::instrument;
 use url::Url;
 
+pub use fetch_email_details::FetchEmailDetailsCommand;
 pub use sync_emails::WatchEmailSyncCommand;
 pub use sync_mailbox::WatchMailboxSyncCommand;
 
@@ -34,6 +36,7 @@ pub enum EmailQueryState {
 pub enum SyncCommand {
     WatchEmails(WatchEmailSyncCommand),
     WatchMailbox(WatchMailboxSyncCommand),
+    FetchEmailDetails(FetchEmailDetailsCommand),
 }
 
 struct AccountState {
@@ -136,6 +139,16 @@ async fn handle_sync_command(
 
         SyncCommand::WatchMailbox(cmd) => {
             sync_mailbox::handle_watch_mailbox_command(cmd, account_state).await
+        }
+
+        SyncCommand::FetchEmailDetails(FetchEmailDetailsCommand { email_id, callback }) => {
+            let result = fetch_email_details::handle_fetch_email_details_command(
+                account_id, jmap_api, repo, &email_id,
+            )
+            .await;
+
+            let _ = callback.send(result);
+            Ok(())
         }
     }
 }

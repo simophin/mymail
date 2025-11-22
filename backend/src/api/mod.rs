@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+mod get_email_body;
 mod stream;
 mod sync_mail;
 mod sync_mailbox;
@@ -25,6 +26,10 @@ pub fn build_api_router() -> axum::Router<ApiState> {
 
     Router::new()
         .route("/mails/{account_id}", post(watch_mail::watch_mail))
+        .route(
+            "/mails/{account_id}/{email_id}",
+            post(get_email_body::get_email_body),
+        )
         .route("/mails/sync/{account_id}", get(sync_mail::sync_mail))
         .route(
             "/mailboxes/sync/{account_id}/{mailbox_id}",
