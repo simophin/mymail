@@ -2,7 +2,8 @@ import {Component, createMemo, createSignal, Show} from 'solid-js';
 import ThreadList, {Thread} from "./ThreadList";
 import MailboxList, {MailboxSchema} from "./MailboxList";
 import {useNavigate, useSearchParams} from "@solidjs/router";
-import HamburgerIcon from "heroicons/24/outline/bars-3.svg?raw";
+import HamburgerIcon from "heroicons/24/outline/bars-3.svg";
+import ArrowLeftIcon from "heroicons/24/outline/chevron-left.svg";
 import {createSignalFromObservableNoError} from "../observables";
 import { streamWebSocketApi } from "../streamApi";
 import * as zod from "zod";
@@ -69,7 +70,7 @@ export default function Home() {
                         drawerToggle.checked = !drawerToggle.checked;
                     }}
                     accountId="1"
-                    class="menu w-60 h-full overflow-auto flex flex-col flex-nowrap"/>
+                    class="menu md:w-60 bg-base-200 h-full overflow-auto flex flex-col flex-nowrap"/>
             </div>
 
 
@@ -78,7 +79,7 @@ export default function Home() {
                     <div class="h-full w-full md:w-80 absolute md:static overflow-hidden flex flex-col">
                         <div class="flex-none navbar bg-base-100 shadow-sm md:hidden">
                             <label for="my-drawer" class="flex-none btn btn-ghost">
-                                <span class="size-4" innerHTML={HamburgerIcon} />
+                                <HamburgerIcon class="size-4" />
                             </label>
 
                             <div class="flex-1">
@@ -89,7 +90,7 @@ export default function Home() {
                             selectedThreadId={props.threadId}
                             pages={threadListPages}
                             onThreadSelected={(id) => {
-                                navigator(`/?mailboxId=${selectedMailbox()!.id}&threadId=${id}`, { replace: true });
+                                navigator(`/?mailboxId=${selectedMailbox()!.id}&threadId=${id}`, { replace: !!props.threadId });
                             }}
                             class="flex-1"
                             query={{accountId: 1, mailboxId: selectedMailbox()!.id}}/>
@@ -97,8 +98,18 @@ export default function Home() {
                 </Show>
 
                 <Show when={!!selectedThread()}>
-                    <div class="h-full w-full md:flex-1 absolute md:static overflow-hidden">
-                        <ThreadDetails thread={selectedThread()!} class="h-full w-full"/>
+                    <div class="h-full w-full md:flex-1 absolute md:static overflow-hidden flex flex-col bg-base-100">
+                        <div class="flex-none navbar bg-base-100 shadow-sm md:hidden">
+                            <button class="flex-none btn btn-ghost" onClick={() => navigator(-1)}>
+                                <ArrowLeftIcon class="size-4 "/>
+                            </button>
+
+                            <div class="flex-1">
+                                <a class="btn btn-ghost text-xl">Read mail</a>
+                            </div>
+                        </div>
+
+                        <ThreadDetails accountId={1} thread={selectedThread()!} class="flex-1 w-full"/>
                     </div>
                 </Show>
             </div>

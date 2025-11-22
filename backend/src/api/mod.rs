@@ -28,7 +28,7 @@ pub fn build_api_router() -> axum::Router<ApiState> {
         .route("/mails/{account_id}", post(watch_mail::watch_mail))
         .route(
             "/mails/{account_id}/{email_id}",
-            post(get_email_body::get_email_body),
+            get(get_email_body::get_email_body),
         )
         .route("/mails/sync/{account_id}", get(sync_mail::sync_mail))
         .route(

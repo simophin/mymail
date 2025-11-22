@@ -21,7 +21,8 @@
     "ts-jest": "^29.4.5",
     "typescript": "^5.7.2",
     "vite": "^7.1.4",
-    "vite-plugin-solid": "^2.11.8"
+    "vite-plugin-solid": "^2.11.8",
+    "vite-plugin-solid-svg": "^0.8.1"
   },
   "dependencies": {
     "@solid-primitives/media": "^2.3.3",

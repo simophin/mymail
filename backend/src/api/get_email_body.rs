@@ -1,9 +1,10 @@
 use super::ApiState;
 use crate::jmap_account::AccountId;
-use crate::sync::{FetchEmailDetailsCommand, SyncCommand};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use crate::sync::{FetchBlobCommand, SyncCommand};
+use crate::util::http_error::{AnyhowHttpError, HttpResult};
+use anyhow::Context;
 use axum::{Json, extract};
+use jmap_client::email::Email;
 use serde::Deserialize;
 use tokio::sync::oneshot;
 
@@ -17,37 +18,36 @@ pub async fn get_email_body(
     state: extract::State<ApiState>,
     extract::Path((account_id, email_id)): extract::Path<(AccountId, String)>,
     extract::Query(Params { html }): extract::Query<Params>,
-) -> impl IntoResponse {
-    let details = match state
+) -> HttpResult<Json<Email>> {
+    if let Some(details) = state
         .repo
         .get_email_parts(account_id, &email_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
-        .and_then(|s| s.ok_or_else(|| (StatusCode::NOT_FOUND, "Email not found").into_response()))
+        .into_internal_error_result()?
     {
-        Ok(details) => details,
-        Err(resp) => return resp,
-    };
-
-    if details.body_structure().is_none() {
-        let Some(sender) = state.sync_command_sender.read().get(&account_id).cloned() else {
-            return (StatusCode::NOT_FOUND, "Account not found").into_response();
-        };
-
-        let (tx, rx) = oneshot::channel();
-        let _ = sender
-            .send(SyncCommand::FetchEmailDetails(FetchEmailDetailsCommand {
-                email_id,
-                callback: tx,
-            }))
-            .await;
-
-        match rx.await {
-            Ok(Ok(email)) => return (StatusCode::OK, Json(email)).into_response(),
-            Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Sync task dropped").into_response(),
-        }
+        return Ok(Json(details));
     }
 
-    (StatusCode::OK, Json(details)).into_response()
+    let sender = state
+        .sync_command_sender
+        .read()
+        .get(&account_id)
+        .context("Account not found")
+        .into_not_found_error_result()?
+        .clone();
+
+    let (tx, rx) = oneshot::channel();
+    let _ = sender
+        .send(SyncCommand::FetchEmailDetails(FetchBlobCommand {
+            email_id,
+            callback: tx,
+        }))
+        .await;
+
+    rx.await
+        .context("Error waiting for sync command")
+        .into_internal_error_result()?
+        .context("Error fetching email details")
+        .into_internal_error_result()
+        .map(Json)
 }

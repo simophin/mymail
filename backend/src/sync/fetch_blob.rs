@@ -7,18 +7,18 @@ use jmap_client::email::{Email, Property};
 use tokio::sync::oneshot;
 
 #[derive(Debug)]
-pub struct FetchEmailDetailsCommand {
-    pub email_id: String,
+pub struct FetchBlobCommand {
+    pub blob_id: String,
 
     #[debug(skip)]
-    pub callback: oneshot::Sender<anyhow::Result<Email>>,
+    pub callback: oneshot::Sender<anyhow::Result<(String, Vec<u8>)>>,
 }
 
-pub async fn handle_fetch_email_details_command(
+pub async fn handle_fetch_blob_command(
     account_id: AccountId,
     jmap_api: &JmapApi,
     repo: &Repository,
-    email_id: &str,
+    blob_id: &str,
 ) -> anyhow::Result<Email> {
     let email = jmap_api
         .get_emails(

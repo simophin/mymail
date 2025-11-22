@@ -1,8 +1,9 @@
-use anyhow::Context;
+use crate::util::network::NetworkAvailability;
+use anyhow::{Context, bail, format_err};
 use derive_more::Debug as DeriveDebug;
 use futures::StreamExt;
 use futures::future::{Either, select};
-use jmap_client::client::Client;
+use jmap_client::client::{Client, ClientBuilder, Credentials};
 use jmap_client::client_ws::WebSocketMessage;
 use jmap_client::core::query::{Comparator, Filter, QueryResponse};
 use jmap_client::core::request::Request;
@@ -10,14 +11,18 @@ use jmap_client::core::response::{
     EmailChangesResponse, EmailGetResponse, MailboxChangesResponse, MailboxGetResponse,
     TaggedMethodResponse,
 };
-use jmap_client::{DataType, PushObject, email};
+use jmap_client::{DataType, PushObject, email, mailbox};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::pin::pin;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use std::time::{Duration, Instant};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
+use tokio::task::JoinSet;
+use tokio::time::sleep_until;
 use tracing::instrument;
+use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub enum EmailSortColumn {
@@ -39,229 +44,216 @@ pub struct EmailQuery {
     pub limit: Option<NonZeroUsize>,
 }
 
+type JmapRequestBuilder = Box<dyn FnOnce(&mut Request<'_>) + Send + Sync>;
+
+type JmapRequestCallback = oneshot::Sender<anyhow::Result<TaggedMethodResponse>>;
+
 #[derive(DeriveDebug)]
-enum JmapRequest {
-    MailboxChanges {
-        since_state: String,
+pub enum ClientState {
+    Disconnected {
+        last_error: Option<anyhow::Error>,
+        #[debug(skip)]
+        delay_connect_until: Option<Instant>,
     },
-    QueryMailboxes,
-    GetMailboxByIds(Vec<String>),
-    QueryEmail(EmailQuery),
-    EmailChanges {
-        since_state: String,
-    },
-    GetEmailByIds {
-        #[debug(ignore)]
-        ids: Vec<String>,
-        partial_properties: Option<Vec<email::Property>>,
-    },
+    Connnecting,
+    Connected(#[debug(skip)] Arc<Client>),
 }
-
-impl JmapRequest {
-    fn to_request(self, client: &Client) -> Request<'_> {
-        match self {
-            Self::MailboxChanges { since_state, .. } => {
-                let mut req = client.build();
-                req.changes_mailbox(since_state).max_changes(100);
-                req
-            }
-
-            Self::QueryMailboxes => {
-                let mut req = client.build();
-                req.query_mailbox().limit(100);
-                req
-            }
-
-            Self::GetMailboxByIds(ids) => {
-                let mut req = client.build();
-                req.get_mailbox().ids(ids);
-                req
-            }
-
-            Self::QueryEmail(EmailQuery {
-                anchor_id,
-                mailbox_id,
-                search_keyword,
-                sorts,
-                limit,
-            }) => {
-                let mut req = client.build();
-                let query = req.query_email().calculate_total(true);
-
-                if let Some(limit) = limit {
-                    query.limit(limit.get());
-                }
-
-                // Construct filters
-                let mut filters = Vec::new();
-                if let Some(mailbox_id) = mailbox_id {
-                    filters.push(email::query::Filter::InMailbox { value: mailbox_id });
-                }
-
-                if let Some(search_keyword) = search_keyword {
-                    filters.push(email::query::Filter::Text {
-                        value: search_keyword,
-                    });
-                }
-
-                if !filters.is_empty() {
-                    query.filter(Filter::and(filters));
-                }
-
-                // Sorts
-                if !sorts.is_empty() {
-                    let jmap_sorts: Vec<_> = sorts
-                        .into_iter()
-                        .map(|s| {
-                            let comparator = match s.column {
-                                EmailSortColumn::Date => {
-                                    Comparator::new(email::query::Comparator::ReceivedAt)
-                                }
-                            };
-
-                            if s.asc {
-                                comparator.ascending()
-                            } else {
-                                comparator.descending()
-                            }
-                        })
-                        .collect();
-                    query.sort(jmap_sorts);
-                }
-
-                // Anchor
-                if let Some(anchor_id) = anchor_id {
-                    query.anchor(anchor_id);
-                }
-
-                req
-            }
-
-            Self::EmailChanges { since_state } => {
-                let mut req = client.build();
-                req.changes_email(since_state);
-                req
-            }
-
-            Self::GetEmailByIds {
-                ids,
-                partial_properties,
-            } => {
-                let mut req = client.build();
-                let r = req.get_email().ids(ids);
-                if let Some(props) = partial_properties {
-                    r.properties(props);
-                }
-                req
-            }
-        }
-    }
-}
-
-type JmapRequestCallback = oneshot::Sender<Vec<TaggedMethodResponse>>;
 
 pub struct JmapApi {
-    request_sender: mpsc::Sender<(JmapRequest, JmapRequestCallback)>,
+    client_state: watch::Receiver<ClientState>,
+    request_sender: mpsc::Sender<(JmapRequestBuilder, JmapRequestCallback)>,
     notification_receiver: broadcast::Receiver<Arc<PushObject>>,
+    tasks: JoinSet<()>,
 }
 
 impl JmapApi {
-    pub async fn new(
-        client: Client,
-    ) -> anyhow::Result<(
-        Self,
-        impl Future<Output = anyhow::Result<()>> + Send + Sync + 'static,
-    )> {
+    #[instrument(skip(credentials, network_availability), level = "debug")]
+    pub fn new(
+        server_url: Url,
+        credentials: impl Into<Credentials> + Clone + Send + Sync + 'static,
+        network_availability: watch::Receiver<NetworkAvailability>,
+    ) -> Self {
         let (request_sender, mut pending_requests_rx) =
-            mpsc::channel::<(JmapRequest, JmapRequestCallback)>(100);
+            mpsc::channel::<(JmapRequestBuilder, JmapRequestCallback)>(100);
         let (notification_sender, notification_receiver) =
             broadcast::channel::<Arc<PushObject>>(100);
 
-        let mut ws_stream = client
-            .connect_ws()
-            .await
-            .context("Failed to connect to JMAP server with websockets")?;
+        let (client_state_tx, client_state) = watch::channel(ClientState::Disconnected {
+            last_error: None,
+            delay_connect_until: None,
+        });
 
-        client
-            .enable_push_ws(
-                Some([DataType::Core, DataType::Mailbox, DataType::Email]),
-                None::<&'static str>,
-            )
-            .await
-            .context("Failed to enable push via ws")?;
+        let mut tasks = JoinSet::new();
 
-        let handle_requests = async move {
-            let mut requests: HashMap<String, oneshot::Sender<Vec<TaggedMethodResponse>>> =
-                Default::default();
+        // Establish initial connection
+        tasks.spawn({
+            let mut network_availability = network_availability.clone();
+            async move {
+                while network_availability.wait_for(|a| a.online).await.is_ok() {
+                    let delay_connect_until = {
+                        match &*client_state_tx.borrow() {
+                            ClientState::Disconnected {
+                                delay_connect_until,
+                                ..
+                            } => *delay_connect_until,
+                            _ => None,
+                        }
+                    };
 
-            loop {
-                let pending_request = pin!(pending_requests_rx.recv());
-                match select(ws_stream.next(), pending_request).await {
-                    Either::Left((Some(Ok(WebSocketMessage::PushNotification(obj))), _)) => {
-                        tracing::info!("Received push notification: {obj:?} ");
-                        let _ = notification_sender.send(Arc::new(obj));
-                    }
+                    if let Some(deadline) = delay_connect_until {
+                        sleep_until((deadline).into()).await;
+                    };
 
-                    Either::Left((Some(Ok(WebSocketMessage::Response(response))), _)) => {
-                        tracing::debug!("Received tagged method response: {response:?}");
-                        if let Some(cb) = response.request_id().and_then(|id| requests.remove(id)) {
-                            let _ = cb.send(response.unwrap_method_responses());
+                    let connect = async {
+                        let _ = client_state_tx.send(ClientState::Connnecting);
+
+                        let client = ClientBuilder::new()
+                            .credentials(credentials.clone())
+                            .follow_redirects([server_url.host_str().unwrap_or_default()])
+                            .connect(server_url.as_str())
+                            .await
+                            .context("Failed to connect to JMAP server")?;
+
+                        let ws = client
+                            .connect_ws()
+                            .await
+                            .context("Failed to connect to JMAP server")?;
+
+                        client
+                            .enable_push_ws(
+                                Some([DataType::Email, DataType::Core, DataType::Mailbox]),
+                                None::<&'static str>,
+                            )
+                            .await
+                            .context("Failed to enable ws push")?;
+
+                        anyhow::Ok((Arc::new(client), ws))
+                    };
+
+                    let (client, mut ws) = match connect
+                        .await
+                        .context("Failed to connect to JMAP server")
+                    {
+                        Ok(v) => {
+                            tracing::info!("Connected to JMAP server");
+                            let _ = client_state_tx.send(ClientState::Connected(v.0.clone()));
+                            v
+                        }
+
+                        Err(e) => {
+                            let _ = client_state_tx.send(ClientState::Disconnected {
+                                last_error: Some(e),
+                                delay_connect_until: Some(Instant::now() + Duration::from_secs(10)),
+                            });
                             continue;
                         }
-                    }
+                    };
 
-                    Either::Left((Some(Err(e)), _)) => {
-                        return Err(e).context("Error receiving WS message");
-                    }
+                    // Handle websocket messages
+                    let mut callbacks: HashMap<String, JmapRequestCallback> = Default::default();
 
-                    Either::Left((None, _)) => {
-                        tracing::info!("WebSocket stream closed");
-                        break;
-                    }
+                    loop {
+                        match select(pin!(ws.next()), pin!(pending_requests_rx.recv())).await {
+                            Either::Left((Some(Ok(WebSocketMessage::Response(res))), _)) => {
+                                if let Some(callback) =
+                                    res.request_id().and_then(|r| callbacks.remove(r))
+                                {
+                                    if let Some(res) = res.unwrap_method_responses().pop() {
+                                        let _ = callback.send(Ok(res));
+                                    } else {
+                                        let _ = callback.send(Err(format_err!(
+                                            "No method responses in tagged response"
+                                        )));
+                                    }
+                                } else {
+                                    tracing::warn!("Unable to find a callback for a response");
+                                }
+                            }
 
-                    Either::Right((Some((req, cb)), _)) => {
-                        tracing::info!("Sending {req:?}");
+                            Either::Left((
+                                Some(Ok(WebSocketMessage::PushNotification(push))),
+                                _,
+                            )) => {
+                                let _ = notification_sender.send(Arc::new(push));
+                            }
 
-                        let request_id = req
-                            .to_request(&client)
-                            .send_ws()
-                            .await
-                            .context("Failed to send WS message")?;
+                            Either::Left((Some(Err(e)), _)) => {
+                                tracing::error!(?e, "Error receiving WS message, reconnecting...");
+                                let _ = client_state_tx.send(ClientState::Disconnected {
+                                    last_error: Some(e.into()),
+                                    delay_connect_until: Some(
+                                        Instant::now() + Duration::from_secs(10),
+                                    ),
+                                });
+                                break;
+                            }
 
-                        tracing::debug!("Sent request with request_id = {request_id}");
-                        requests.insert(request_id, cb);
-                    }
+                            Either::Left((None, _)) | Either::Right((None, _)) => {
+                                tracing::info!("WS stream or request channel closed, aborting...");
+                                return;
+                            }
 
-                    Either::Right((None, _)) => {
-                        tracing::info!("Pending requests channel closed");
-                        break;
+                            Either::Right((Some((req_builder, callback)), _)) => {
+                                let mut req = client.build();
+                                req_builder(&mut req);
+                                match req.send_ws().await {
+                                    Ok(request_id) => {
+                                        callbacks.insert(request_id, callback);
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(
+                                            ?e,
+                                            "Error sending WS message to JMAP server"
+                                        );
+                                        let e = Arc::new(e);
+                                        let _ = client_state_tx.send(ClientState::Disconnected {
+                                            last_error: Some(e.clone().into()),
+                                            delay_connect_until: Some(
+                                                Instant::now() + Duration::from_secs(10),
+                                            ),
+                                        });
+                                        let _ = callback
+                                            .send(Err(e).context("Error queueing ws request"));
+                                        break;
+                                    }
+                                };
+                            }
+                        }
                     }
                 }
             }
+        });
 
-            anyhow::Ok(())
-        };
-
-        Ok((
-            Self {
-                request_sender,
-                notification_receiver,
-            },
-            handle_requests,
-        ))
+        Self {
+            client_state,
+            request_sender,
+            notification_receiver,
+            tasks,
+        }
     }
 
     pub fn subscribe_pushes(&self) -> broadcast::Receiver<Arc<PushObject>> {
         self.notification_receiver.resubscribe()
     }
 
-    async fn send_ws_request(&self, req: JmapRequest) -> anyhow::Result<TaggedMethodResponse> {
+    pub fn subscribe_client_state(&self) -> watch::Receiver<ClientState> {
+        self.client_state.clone()
+    }
+
+    async fn send_ws_request(
+        &self,
+        req: impl FnOnce(&mut Request<'_>) + Send + Sync + 'static,
+    ) -> anyhow::Result<TaggedMethodResponse> {
         let (callback, resp_rx) = oneshot::channel();
 
-        self.request_sender
-            .send((req, callback))
+        if self
+            .request_sender
+            .send((Box::new(req), callback))
             .await
-            .context("Error sending WS request")?;
+            .is_err()
+        {
+            bail!("Queueing request failed");
+        }
 
         Ok(resp_rx
             .await
@@ -273,18 +265,22 @@ impl JmapApi {
 
     #[instrument(skip(self), ret, level = "debug")]
     pub async fn query_mailboxes(&self) -> anyhow::Result<QueryResponse> {
-        self.send_ws_request(JmapRequest::QueryMailboxes)
-            .await?
-            .unwrap_query_mailbox()
-            .context("Expecting mailbox query response")
+        self.send_ws_request(|r| {
+            r.query_mailbox();
+        })
+        .await?
+        .unwrap_query_mailbox()
+        .context("Expecting mailbox query response")
     }
 
     #[instrument(skip(self), ret, level = "debug")]
     pub async fn get_mailboxes(&self, ids: Vec<String>) -> anyhow::Result<MailboxGetResponse> {
-        self.send_ws_request(JmapRequest::GetMailboxByIds(ids))
-            .await?
-            .unwrap_get_mailbox()
-            .context("Expecting mailbox get response")
+        self.send_ws_request(move |r| {
+            r.get_mailbox().ids(ids);
+        })
+        .await?
+        .unwrap_get_mailbox()
+        .context("Expecting mailbox get response")
     }
 
     #[instrument(skip(self), ret, level = "debug")]
@@ -292,26 +288,86 @@ impl JmapApi {
         &self,
         since_state: String,
     ) -> anyhow::Result<MailboxChangesResponse> {
-        self.send_ws_request(JmapRequest::MailboxChanges { since_state })
-            .await?
-            .unwrap_changes_mailbox()
-            .context("Expecting mailbox changes response")
+        self.send_ws_request(move |r| {
+            r.query_mailbox_changes(since_state);
+        })
+        .await?
+        .unwrap_changes_mailbox()
+        .context("Expecting mailbox changes response")
     }
 
     #[instrument(skip(self), ret, level = "debug")]
     pub async fn query_emails(&self, query: EmailQuery) -> anyhow::Result<QueryResponse> {
-        self.send_ws_request(JmapRequest::QueryEmail(query))
-            .await?
-            .unwrap_query_email()
-            .context("Expecting email query response")
+        self.send_ws_request(move |req| {
+            let EmailQuery {
+                anchor_id,
+                mailbox_id,
+                search_keyword,
+                sorts,
+                limit,
+            } = query;
+
+            let query = req.query_email().calculate_total(true);
+
+            if let Some(limit) = limit {
+                query.limit(limit.get());
+            }
+
+            // Construct filters
+            let mut filters = Vec::new();
+            if let Some(mailbox_id) = mailbox_id {
+                filters.push(email::query::Filter::InMailbox { value: mailbox_id });
+            }
+
+            if let Some(search_keyword) = search_keyword {
+                filters.push(email::query::Filter::Text {
+                    value: search_keyword,
+                });
+            }
+
+            if !filters.is_empty() {
+                query.filter(Filter::and(filters));
+            }
+
+            // Sorts
+            if !sorts.is_empty() {
+                let jmap_sorts: Vec<_> = sorts
+                    .into_iter()
+                    .map(|s| {
+                        let comparator = match s.column {
+                            EmailSortColumn::Date => {
+                                Comparator::new(email::query::Comparator::ReceivedAt)
+                            }
+                        };
+
+                        if s.asc {
+                            comparator.ascending()
+                        } else {
+                            comparator.descending()
+                        }
+                    })
+                    .collect();
+                query.sort(jmap_sorts);
+            }
+
+            // Anchor
+            if let Some(anchor_id) = anchor_id {
+                query.anchor(anchor_id);
+            }
+        })
+        .await?
+        .unwrap_query_email()
+        .context("Expecting email query response")
     }
 
     #[instrument(skip(self), ret, level = "debug")]
     pub async fn email_changes(&self, since_state: String) -> anyhow::Result<EmailChangesResponse> {
-        self.send_ws_request(JmapRequest::EmailChanges { since_state })
-            .await?
-            .unwrap_changes_email()
-            .context("Expecting email changes response")
+        self.send_ws_request(move |r| {
+            r.changes_email(since_state);
+        })
+        .await?
+        .unwrap_changes_email()
+        .context("Expecting email changes response")
     }
 
     #[instrument(skip(self), ret, level = "debug")]
@@ -320,9 +376,11 @@ impl JmapApi {
         ids: Vec<String>,
         partial_properties: Option<Vec<email::Property>>,
     ) -> anyhow::Result<EmailGetResponse> {
-        self.send_ws_request(JmapRequest::GetEmailByIds {
-            ids,
-            partial_properties,
+        self.send_ws_request(move |r| {
+            let req = r.get_email().ids(ids);
+            if let Some(props) = partial_properties {
+                req.properties(props);
+            }
         })
         .await?
         .unwrap_get_email()

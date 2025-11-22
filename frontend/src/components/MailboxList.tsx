@@ -1,10 +1,11 @@
-import {For, JSX, Show, splitProps} from "solid-js";
+import {Component, For, JSX, Show, splitProps} from "solid-js";
 import * as zod from "zod";
-import InboxIcon from "heroicons/24/outline/inbox.svg?raw";
-import PaperPlaneIcon from "heroicons/24/outline/paper-airplane.svg?raw";
-import FolderIcon from "heroicons/24/outline/folder.svg?raw"
-import TrashIcon from "heroicons/24/outline/trash.svg?raw";
-import FileIcon from "heroicons/24/outline/document.svg?raw";
+import InboxIcon from "heroicons/24/outline/inbox.svg";
+import PaperPlaneIcon from "heroicons/24/outline/paper-airplane.svg";
+import FolderIcon from "heroicons/24/outline/folder.svg"
+import TrashIcon from "heroicons/24/outline/trash.svg";
+import FileIcon from "heroicons/24/outline/document.svg";
+import {Dynamic} from "solid-js/web";
 
 export const MailboxSchema = zod.object({
     id: zod.string(),
@@ -50,7 +51,7 @@ export default function MailboxList(props: Props) {
 }
 
 function MailboxIcon(props: { role?: Mailbox["role"], class?: string }) {
-    let icon;
+    let icon: Component<{ class?: string }>;
     switch (props.role) {
         case "inbox":
             icon = InboxIcon;
@@ -69,7 +70,7 @@ function MailboxIcon(props: { role?: Mailbox["role"], class?: string }) {
             break;
     }
 
-    return <span class="size-4" innerHTML={icon}></span>;
+    return <Dynamic component={icon} class={`size-4 ${props.class}`}/>;
 }
 
 function MailboxItem(props: {

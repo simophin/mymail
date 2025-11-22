@@ -17,6 +17,7 @@ mod jmap_account;
 mod jmap_api;
 mod repo;
 mod sync;
+mod util;
 
 #[tokio::main]
 async fn main() {

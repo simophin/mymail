@@ -153,15 +153,17 @@ impl super::Repository {
         )
         .fetch_optional(self.pool())
         .await
-        .context("Error querying email details")?;
+        .context("Error querying email details")?
+        .context("Email not found")?;
 
-        if let Some(row) = row {
-            let email = serde_json::from_str::<Email>(&row.part_details.unwrap_or_default())
-                .context("Error deserializing email details")?;
-            Ok(Some(email))
-        } else {
-            Ok(None)
-        }
+        let Some(part_details) = &row.part_details else {
+            return Ok(None);
+        };
+
+        let email = serde_json::from_str::<Email>(&part_details)
+            .context("Error deserializing email details")?;
+
+        Ok(Some(email))
     }
 
     pub async fn update_email_details(
