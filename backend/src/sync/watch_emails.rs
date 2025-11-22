@@ -7,6 +7,7 @@ use futures::future::{Either, select};
 use jmap_client::{DataType, PushObject};
 use std::fmt::{Debug, Formatter};
 use std::pin::pin;
+use std::sync::Arc;
 use tokio::sync::watch;
 
 pub struct WatchEmailSyncCommand {
@@ -21,9 +22,9 @@ impl Debug for WatchEmailSyncCommand {
 }
 
 pub async fn handle_watch_command(
-    repo: &Repository,
+    repo: Arc<Repository>,
     account_id: AccountId,
-    jmap_api: &JmapApi,
+    jmap_api: Arc<JmapApi>,
     WatchEmailSyncCommand {
         mut query_rx,
         state_tx,

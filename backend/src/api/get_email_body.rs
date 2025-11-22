@@ -1,6 +1,6 @@
 use super::ApiState;
 use crate::jmap_account::AccountId;
-use crate::sync::{FetchBlobCommand, SyncCommand};
+use crate::sync::SyncCommand;
 use crate::util::http_error::{AnyhowHttpError, HttpResult};
 use anyhow::Context;
 use axum::{Json, extract};
@@ -13,7 +13,6 @@ pub struct Params {
     #[serde(default)]
     pub html: bool,
 }
-
 pub async fn get_email_body(
     state: extract::State<ApiState>,
     extract::Path((account_id, email_id)): extract::Path<(AccountId, String)>,
@@ -29,25 +28,27 @@ pub async fn get_email_body(
     }
 
     let sender = state
-        .sync_command_sender
+        .account_states
         .read()
         .get(&account_id)
         .context("Account not found")
         .into_not_found_error_result()?
         .clone();
 
-    let (tx, rx) = oneshot::channel();
-    let _ = sender
-        .send(SyncCommand::FetchEmailDetails(FetchBlobCommand {
-            email_id,
-            callback: tx,
-        }))
-        .await;
+    // let (tx, rx) = oneshot::channel();
+    // let _ = sender
+    //     .send(SyncCommand::FetchEmailDetails(FetchBlobCommand {
+    //         email_id,
+    //         callback: tx,
+    //     }))
+    //     .await;
+    //
+    // rx.await
+    //     .context("Error waiting for sync command")
+    //     .into_internal_error_result()?
+    //     .context("Error fetching email details")
+    //     .into_internal_error_result()
+    //     .map(Json)
 
-    rx.await
-        .context("Error waiting for sync command")
-        .into_internal_error_result()?
-        .context("Error fetching email details")
-        .into_internal_error_result()
-        .map(Json)
+    todo!()
 }

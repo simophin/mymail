@@ -1,4 +1,5 @@
-use crate::jmap_account::AccountId;
+use crate::jmap_account::{Account, AccountId};
+use crate::jmap_api::JmapApi;
 use crate::repo::Repository;
 use crate::sync::SyncCommand;
 use axum::routing::{get, post};
@@ -6,6 +7,7 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 
 mod get_email_body;
 mod stream;
@@ -15,10 +17,17 @@ mod watch_mail;
 mod watch_mailboxes;
 mod watch_threads;
 
+pub struct AccountState {
+    pub account: Account,
+    pub command_sender: mpsc::Sender<SyncCommand>,
+    pub jmap_api: Arc<JmapApi>,
+    pub join_set: JoinSet<anyhow::Result<()>>,
+}
+
 #[derive(Clone)]
 pub struct ApiState {
     pub repo: Arc<Repository>,
-    pub sync_command_sender: Arc<RwLock<HashMap<AccountId, mpsc::Sender<SyncCommand>>>>,
+    pub account_states: Arc<RwLock<HashMap<AccountId, AccountState>>>,
 }
 
 pub fn build_api_router() -> axum::Router<ApiState> {

@@ -1,7 +1,9 @@
 use crate::repo::Repository;
 use anyhow::Context;
+use derive_more::Debug;
 use serde::{Deserialize, Serialize};
 
+#[derive(PartialEq, Eq, Debug)]
 pub struct Account {
     pub server_url: String,
     pub credentials: Credentials,
@@ -10,9 +12,24 @@ pub struct Account {
 
 pub type AccountId = i64;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub enum Credentials {
-    Basic { username: String, password: String },
+    Basic {
+        #[debug(skip)]
+        username: String,
+        #[debug(skip)]
+        password: String,
+    },
+}
+
+impl Into<jmap_client::client::Credentials> for Credentials {
+    fn into(self) -> jmap_client::client::Credentials {
+        match self {
+            Credentials::Basic { username, password } => {
+                jmap_client::client::Credentials::basic(&username, &password)
+            }
+        }
+    }
 }
 
 pub trait AccountRepositoryExt {

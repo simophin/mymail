@@ -2,30 +2,25 @@ use super::EmailQueryState;
 use crate::jmap_account::AccountId;
 use crate::jmap_api::{EmailQuery, EmailSort, EmailSortColumn, JmapApi};
 use crate::repo::Repository;
+use crate::util::tasks::{AbortHandleExt, AutoAbortHandle};
 use anyhow::{Context, bail};
+use derive_more::Debug;
 use futures::FutureExt;
 use futures::future::{FusedFuture, try_join_all};
 use itertools::Itertools;
 use jmap_client::{DataType, PushObject};
 use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
 use std::future::pending;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tracing::instrument;
 
+#[derive(Debug)]
 pub struct WatchMailboxSyncCommand {
     pub mailbox_id: String,
+    #[debug(skip)]
     pub state_tx: watch::Sender<EmailQueryState>,
-}
-
-impl Debug for WatchMailboxSyncCommand {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WatchMailboxSyncCommand")
-            .field("mailbox_id", &self.mailbox_id)
-            .finish()
-    }
 }
 
 pub async fn handle_watch_mailbox_command(
@@ -33,11 +28,11 @@ pub async fn handle_watch_mailbox_command(
         mailbox_id,
         state_tx,
     }: WatchMailboxSyncCommand,
-    state: &super::AccountState,
+    mailbox_watch_request_tx: mpsc::Sender<(String, WatchRequest)>,
 ) -> anyhow::Result<()> {
     let (tx, rx) = oneshot::channel();
-    state
-        .mailbox_watch_request_tx
+
+    mailbox_watch_request_tx
         .send((mailbox_id, tx))
         .await
         .context("Failed to send mailbox watch request")?;
@@ -51,20 +46,20 @@ pub async fn handle_watch_mailbox_command(
 }
 
 pub async fn sync_mailboxes(
-    repo: &Repository,
+    repo: Arc<Repository>,
     account_id: AccountId,
-    jmap_api: &JmapApi,
+    jmap_api: Arc<JmapApi>,
     mut mailbox_watch_request_rx: mpsc::Receiver<(String, WatchRequest)>,
 ) -> anyhow::Result<()> {
     let mut sub = repo.subscribe_db_changes();
     let push_notification = jmap_api.subscribe_pushes();
 
-    struct MailboxSyncState<F> {
+    struct MailboxSyncState {
         watch_request_sender: mpsc::Sender<WatchRequest>,
-        worker: F,
+        handle: AutoAbortHandle,
     }
 
-    let mut mailbox_workers: HashMap<String, MailboxSyncState<_>> = Default::default();
+    let mut mailbox_workers: HashMap<String, MailboxSyncState> = Default::default();
 
     loop {
         let mailboxes: HashSet<String> = repo
@@ -84,32 +79,22 @@ pub async fn sync_mailboxes(
                     mailbox_id.clone(),
                     MailboxSyncState {
                         watch_request_sender,
-                        worker: Box::pin(sync_mailbox(
-                            repo,
+                        handle: tokio::spawn(sync_mailbox(
+                            repo.clone(),
                             account_id,
                             mailbox_id,
-                            jmap_api,
+                            jmap_api.clone(),
                             push_notification.resubscribe(),
                             watch_request_rx,
                         ))
-                        .fuse(),
+                        .auto_abort(),
                     },
                 );
             }
         }
 
         loop {
-            let drive_workers = async {
-                while !mailbox_workers.is_empty() {
-                    let _ = try_join_all(mailbox_workers.values_mut().map(|w| &mut w.worker)).await;
-                    mailbox_workers.retain(|_, value| !value.worker.is_terminated());
-                }
-
-                pending::<()>().await;
-            };
-
             select! {
-                _ = drive_workers => {}
                 r = mailbox_watch_request_rx.recv() => {
                     let Some((mailbox_id, watch_request)) = r else {
                         bail!("Mailbox watch request channel closed unexpectedly");
@@ -150,10 +135,10 @@ pub type WatchRequest = oneshot::Sender<watch::Receiver<EmailQueryState>>;
     level = "info"
 )]
 pub async fn sync_mailbox(
-    repo: &Repository,
+    repo: Arc<Repository>,
     account_id: AccountId,
     mailbox_id: String,
-    jmap_api: &JmapApi,
+    jmap_api: Arc<JmapApi>,
     mut email_notification: broadcast::Receiver<Arc<PushObject>>,
     mut watcher_requests: mpsc::Receiver<WatchRequest>,
 ) -> anyhow::Result<()> {
@@ -208,7 +193,7 @@ pub async fn sync_mailbox(
 
         let _ = state_tx.send(EmailQueryState::InProgress);
 
-        match sync_mailbox_once(repo, account_id, &mailbox_id, jmap_api).await {
+        match sync_mailbox_once(&repo, account_id, &mailbox_id, &jmap_api).await {
             Ok(_) => {}
             Err(e) => {
                 tracing::error!(?e, "Sync failed");
@@ -273,17 +258,9 @@ pub async fn sync_mailbox_once(
         }
     }
 
-    for chunk in &updated.into_iter().chunks(200) {
+    while !updated.is_empty() {
         let emails = jmap_api
-            .get_emails(
-                chunk.collect(),
-                None,
-                // Some(vec![
-                //     email::Property::ReceivedAt,
-                //     email::Property::ThreadId,
-                //     email::Property::MailboxIds,
-                // ]),
-            )
+            .get_emails(updated.drain(0..).take(200).collect_vec(), None)
             .await
             .context("Error getting emails")?
             .take_list();

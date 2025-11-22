@@ -11,7 +11,7 @@ use jmap_client::core::response::{
     EmailChangesResponse, EmailGetResponse, MailboxChangesResponse, MailboxGetResponse,
     TaggedMethodResponse,
 };
-use jmap_client::{DataType, PushObject, email, mailbox};
+use jmap_client::{DataType, PushObject, email};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -101,7 +101,7 @@ impl JmapApi {
                     };
 
                     if let Some(deadline) = delay_connect_until {
-                        sleep_until((deadline).into()).await;
+                        sleep_until(deadline.into()).await;
                     };
 
                     let connect = async {

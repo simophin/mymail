@@ -16,7 +16,12 @@ pub async fn sync_mail(
     account_id: extract::Path<AccountId>,
     upgrade: extract::ws::WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let Some(tx) = state.sync_command_sender.read().get(&account_id.0).cloned() else {
+    let Some(tx) = state
+        .account_states
+        .read()
+        .get(&account_id.0)
+        .map(|s| s.command_sender.clone())
+    else {
         return (
             StatusCode::NOT_FOUND,
             format!("Account {} not found", account_id.0),
