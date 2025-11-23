@@ -34,7 +34,7 @@ impl super::Repository {
                 LIMIT ?3, ?4
             )
             SELECT thread_id,
-                     (SELECT json_group_array(json(e.jmap_data)) FROM emails e WHERE e.account_id = ?1 AND e.id IN (SELECT value FROM json_each(email_ids))) AS "emails!: String"
+                     (SELECT json_group_array(json(e.jmap_data) ORDER BY e.received_at DESC) FROM emails e WHERE e.account_id = ?1 AND e.id IN (SELECT value FROM json_each(email_ids))) AS "emails!: String"
             FROM threads
             ORDER BY last_received_at DESC, thread_id
             "#,

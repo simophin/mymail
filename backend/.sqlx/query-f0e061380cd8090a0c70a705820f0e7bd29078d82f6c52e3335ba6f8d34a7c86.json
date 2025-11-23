@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE blobs SET last_accessed = CURRENT_TIMESTAMP\n             WHERE account_id = ? AND id = ?\n             RETURNING name, mime_type, data",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "mime_type",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "data",
+        "ordinal": 2,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "f0e061380cd8090a0c70a705820f0e7bd29078d82f6c52e3335ba6f8d34a7c86"
+}

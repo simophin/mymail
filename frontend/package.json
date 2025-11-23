@@ -29,6 +29,7 @@
     "@solidjs/router": "^0.15.4",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.16",
+    "gravatar-url": "^4.0.1",
     "heroicons": "^2.2.0",
     "immutable": "^5.1.4",
     "pino": "^10.1.0",

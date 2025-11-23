@@ -1,12 +1,13 @@
-import LazyLoadingList, {Page, Props as ListProps} from "./LazyLoadingList";
-import {createEffect, createSignal, onCleanup, Signal, splitProps, untrack} from "solid-js";
+import LazyLoadingList, {Page} from "./LazyLoadingList";
+import {createEffect, createSignal, onCleanup, Signal, untrack} from "solid-js";
 import {streamWebSocketApi} from "../streamApi";
 import {BehaviorSubject, filter, map, retry} from "rxjs";
 import {List as ImmutableList, Set as ImmutableSet} from "immutable";
 import * as zod from "zod";
+import PaperClipIcon from "heroicons/24/outline/paper-clip.svg";
 
 import {log as parentLog} from "../log";
-import {createSignalFromObservable} from "../observables";
+import EmailIcon from "./EmailIcon";
 
 const log = parentLog.child({"component": "ThreadList"});
 
@@ -24,14 +25,17 @@ export type ThreadQuery = {
 
 export type AccountId = number;
 
-const BodyValueSchema = zod.object({});
-
 const BodyPartSchema = zod.object({
     partId: zod.string(),
     blobId: zod.string(),
     type: zod.string(),
     size: zod.number(),
-})
+});
+
+const EmailAddressSchema = zod.object({
+    name: zod.string().nullable().optional(),
+    email: zod.string().nullable(),
+});
 
 const EmailSchema = zod.object({
     id: zod.string(),
@@ -40,6 +44,8 @@ const EmailSchema = zod.object({
     preview: zod.string().optional(),
     htmlBody: zod.array(BodyPartSchema),
     textBody: zod.array(BodyPartSchema),
+    hasAttachment: zod.boolean(),
+    from: zod.array(EmailAddressSchema),
 });
 
 const ThreadSchema = zod.object({
@@ -135,6 +141,10 @@ export default function ThreadList(props: {
         props.onThreadSelected?.(ele.dataset.id!);
     };
 
+    const containsAttachment = (thread: Thread) => {
+        return thread.emails.some((email) => email.hasAttachment)
+    };
+
     return <LazyLoadingList
         numPerPage={numPerPage}
         watchPage={watchPage}
@@ -144,15 +154,43 @@ export default function ThreadList(props: {
         jumpToHeadTimestamp={props.jumpToHeadTimestamp}
         watchingPages={watchingPages}>
         {(thread) => (
-            <li class={`list-row hover:bg-base-200 cursor-pointer prose ${(props.selectedThreadId && props.selectedThreadId == thread?.id) ? 'bg-base-200' : ''}`}
+            <li class={`hover:bg-base-200 p-4 border-b-base-200 border-b-2 flex items-center cursor-pointer ${(props.selectedThreadId && props.selectedThreadId == thread?.id) ? 'bg-base-200' : ''}`}
                 data-id={thread?.id}
                 onClick={onThreadItemClick}
                 role="link">
-                <h4 class="list-col-grow">{thread?.emails?.at(0)?.subject}</h4>
-                <small class="list-col-wrap line-clamp-2">{thread?.emails?.at(0)?.preview}</small>
+
+                <EmailIcon address={thread!.emails?.at(0)?.from?.at(0)?.email ?? ''}
+                           class="flex-none not-prose mr-2 rounded-full"
+                           size="lg" />
+
+                <div class="flex-1">
+                    <h4 class="flex items-center line-clamp-2 text-lg mb-1">
+                        {containsAttachment(thread!) &&
+                            <PaperClipIcon class="size-4 inline-block mr-1 align-text-bottom"/>}
+                        {thread?.emails?.at(0)?.subject}
+                    </h4>
+                    <div class="line-clamp-2 text-sm">
+                        <ThreadPreview thread={thread!}/>
+                    </div>
+                </div>
+
             </li>
         )}
     </LazyLoadingList>;
+}
+
+function ThreadPreview(props: { thread: Thread }) {
+    const firstMail = () => props.thread.emails[0];
+
+    const sender = () => {
+        const senderName = firstMail().from[0].name;
+        return senderName && <b>{senderName}:&nbsp;</b>;
+    }
+
+    return <>
+        {sender()}
+        {firstMail().subject}
+    </>
 }
 
 function last<T>(arr: T[] | undefined): T | undefined {

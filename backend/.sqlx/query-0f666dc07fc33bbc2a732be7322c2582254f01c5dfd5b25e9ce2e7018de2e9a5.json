@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO blobs (account_id, id, name, mime_type, data, last_accessed)\n             VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)\n             ON CONFLICT DO UPDATE SET last_accessed = CURRENT_TIMESTAMP\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "0f666dc07fc33bbc2a732be7322c2582254f01c5dfd5b25e9ce2e7018de2e9a5"
+}

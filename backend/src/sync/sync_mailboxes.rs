@@ -5,12 +5,9 @@ use crate::repo::Repository;
 use crate::util::tasks::{AbortHandleExt, AutoAbortHandle};
 use anyhow::{Context, bail};
 use derive_more::Debug;
-use futures::FutureExt;
-use futures::future::{FusedFuture, try_join_all};
 use itertools::Itertools;
 use jmap_client::{DataType, PushObject};
 use std::collections::{HashMap, HashSet};
-use std::future::pending;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -259,13 +256,14 @@ pub async fn sync_mailbox_once(
     }
 
     while !updated.is_empty() {
+        let chunk_size = updated.len().min(200);
         let emails = jmap_api
-            .get_emails(updated.drain(0..).take(200).collect_vec(), None)
+            .get_emails(updated.drain(0..chunk_size).collect_vec(), None)
             .await
             .context("Error getting emails")?
             .take_list();
 
-        tracing::debug!("Adding {} emails", emails.len());
+        tracing::info!("Adding {} emails", emails.len());
 
         repo.update_emails(account_id, &emails)
             .await
