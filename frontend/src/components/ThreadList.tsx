@@ -1,15 +1,16 @@
-import LazyLoadingList, {Page} from "./LazyLoadingList";
-import {createEffect, createSignal, onCleanup, Signal, untrack} from "solid-js";
-import {streamWebSocketApi} from "../streamApi";
-import {BehaviorSubject, filter, map, retry} from "rxjs";
-import {List as ImmutableList, Set as ImmutableSet} from "immutable";
+import LazyLoadingList, { Page } from "./LazyLoadingList";
+import { createEffect, createSignal, onCleanup, Signal, untrack } from "solid-js";
+import { streamWebSocketApi } from "../streamApi";
+import { BehaviorSubject, filter, map, retry } from "rxjs";
+import { List as ImmutableList, Set as ImmutableSet } from "immutable";
 import * as zod from "zod";
 import PaperClipIcon from "heroicons/24/outline/paper-clip.svg";
 
-import {log as parentLog} from "../log";
+import { log as parentLog } from "../log";
 import EmailIcon from "./EmailIcon";
+import { formatRelative } from "date-fns";
 
-const log = parentLog.child({"component": "ThreadList"});
+const log = parentLog.child({ "component": "ThreadList" });
 
 const apiUrl: string = import.meta.env.VITE_BASE_URL;
 
@@ -96,7 +97,7 @@ export default function ThreadList(props: {
             emailSyncQuery)
             .pipe(retry({ count: Infinity, delay: 1000 }))
             .subscribe((syncState) => {
-                log.info({syncState}, "Got new email sync state");
+                log.info({ syncState }, "Got new email sync state");
             });
 
         onCleanup(() => sub.unsubscribe());
@@ -137,7 +138,7 @@ export default function ThreadList(props: {
 
     const onThreadItemClick = (evt: Event) => {
         const ele = evt.currentTarget as HTMLElement;
-        log.info({id: ele.dataset.id}, "Thread item clicked");
+        log.info({ id: ele.dataset.id }, "Thread item clicked");
         props.onThreadSelected?.(ele.dataset.id!);
     };
 
@@ -160,17 +161,19 @@ export default function ThreadList(props: {
                 role="link">
 
                 <EmailIcon address={thread!.emails?.at(0)?.from?.at(0)?.email ?? ''}
-                           class="flex-none not-prose mr-2 rounded-full"
-                           size="lg" />
+                    name={thread!.emails?.at(0)?.from?.at(0)?.name}
+                    class="flex-none not-prose mr-2 rounded-full"
+                    size="lg" />
 
                 <div class="flex-1">
-                    <h4 class="flex items-center line-clamp-2 text-lg mb-1">
+                    <h4 class="flex items-center mb-1">
                         {containsAttachment(thread!) &&
-                            <PaperClipIcon class="size-4 inline-block mr-1 align-text-bottom"/>}
-                        {thread?.emails?.at(0)?.subject}
+                            <PaperClipIcon class="size-4 inline-block mr-1 align-text-bottom" />}
+                        <span class="text-lg flex-1 overflow-x-hidden line-clamp-1 text-ellipsis">{thread?.emails?.at(0)?.subject}</span>
+                        <span class="ml-2 text-sm text-gray-500">{formatThreadTime(thread!)}</span>
                     </h4>
                     <div class="line-clamp-2 text-sm">
-                        <ThreadPreview thread={thread!}/>
+                        <ThreadPreview thread={thread!} />
                     </div>
                 </div>
 
@@ -179,11 +182,17 @@ export default function ThreadList(props: {
     </LazyLoadingList>;
 }
 
+function formatThreadTime(thread: Thread) {
+    const firstMail = thread.emails[0];
+    const date = new Date(firstMail.receivedAt);
+    return formatRelative(date, new Date());
+}
+
 function ThreadPreview(props: { thread: Thread }) {
     const firstMail = () => props.thread.emails[0];
 
     const sender = () => {
-        const senderName = firstMail().from[0].name;
+        const senderName = firstMail().from[0].name ?? firstMail().from[0].email;
         return senderName && <b>{senderName}:&nbsp;</b>;
     }
 

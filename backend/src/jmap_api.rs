@@ -295,7 +295,7 @@ impl JmapApi {
         since_state: String,
     ) -> anyhow::Result<MailboxChangesResponse> {
         self.send_ws_request(move |r| {
-            r.query_mailbox_changes(since_state);
+            r.changes_mailbox(since_state);
         })
         .await?
         .unwrap_changes_mailbox()
