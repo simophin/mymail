@@ -26,12 +26,20 @@ export type AccountId = number;
 
 const BodyValueSchema = zod.object({});
 
+const BodyPartSchema = zod.object({
+    partId: zod.string(),
+    blobId: zod.string(),
+    type: zod.string(),
+    size: zod.number(),
+})
+
 const EmailSchema = zod.object({
     id: zod.string(),
     subject: zod.string().optional(),
     receivedAt: zod.string(),
     preview: zod.string().optional(),
-    bodyValues: zod.record(zod.string(), BodyValueSchema).optional(),
+    htmlBody: zod.array(BodyPartSchema),
+    textBody: zod.array(BodyPartSchema),
 });
 
 const ThreadSchema = zod.object({
@@ -57,6 +65,7 @@ export default function ThreadList(props: {
     onThreadSelected?: (threadId: string) => void,
     class?: string,
     pages?: Signal<ImmutableList<Page<Thread>>>,
+    jumpToHeadTimestamp?: number,
 }) {
     const watchingPages = createSignal(ImmutableSet([0]));
     const watchPage = (offset: number, limit: number) => {
@@ -132,6 +141,7 @@ export default function ThreadList(props: {
         class={`${props.class} list w-full h-full overflow-y-scroll`}
         pages={pages}
         deps={[props.query.accountId, props.query.mailboxId]}
+        jumpToHeadTimestamp={props.jumpToHeadTimestamp}
         watchingPages={watchingPages}>
         {(thread) => (
             <li class={`list-row hover:bg-base-200 cursor-pointer prose ${(props.selectedThreadId && props.selectedThreadId == thread?.id) ? 'bg-base-200' : ''}`}

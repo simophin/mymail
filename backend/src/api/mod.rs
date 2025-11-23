@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-mod get_email_body;
+mod get_blob;
 mod stream;
 mod sync_mail;
 mod sync_mailbox;
@@ -35,10 +35,7 @@ pub fn build_api_router() -> axum::Router<ApiState> {
 
     Router::new()
         .route("/mails/{account_id}", post(watch_mail::watch_mail))
-        .route(
-            "/mails/{account_id}/{email_id}",
-            get(get_email_body::get_email_body),
-        )
+        .route("/blobs/{account_id}/{blob_id}", get(get_blob::get_blob))
         .route("/mails/sync/{account_id}", get(sync_mail::sync_mail))
         .route(
             "/mailboxes/sync/{account_id}/{mailbox_id}",

@@ -57,6 +57,8 @@ export default function Home() {
         }
     });
 
+    const [jumpToThreadListHeadTimestamp, setJumpToThreadListHeadTimestamp] = createSignal<number>();
+
     return (
         <div class="drawer md:drawer-open overflow-hidden w-screen h-screen">
             {drawerToggle}
@@ -83,7 +85,7 @@ export default function Home() {
                             </label>
 
                             <div class="flex-1">
-                                <a class="btn btn-ghost text-xl">{selectedMailbox()?.name}</a>
+                                <a class="btn btn-ghost text-xl" onClick={() => setJumpToThreadListHeadTimestamp(Date.now)}>{selectedMailbox()?.name}</a>
                             </div>
                         </div>
                         <ThreadList
@@ -93,19 +95,20 @@ export default function Home() {
                                 navigator(`/?mailboxId=${selectedMailbox()!.id}&threadId=${id}`, { replace: !!props.threadId });
                             }}
                             class="flex-1"
+                            jumpToHeadTimestamp={jumpToThreadListHeadTimestamp()}
                             query={{accountId: 1, mailboxId: selectedMailbox()!.id}}/>
                     </div>
                 </Show>
 
                 <Show when={!!selectedThread()}>
-                    <div class="h-full w-full md:flex-1 absolute md:static overflow-hidden flex flex-col bg-base-100">
+                    <div class="h-full w-full md:flex-1 md:w-0 absolute md:static overflow-hidden flex flex-col bg-base-100">
                         <div class="flex-none navbar bg-base-100 shadow-sm md:hidden">
                             <button class="flex-none btn btn-ghost" onClick={() => navigator(-1)}>
                                 <ArrowLeftIcon class="size-4 "/>
                             </button>
 
                             <div class="flex-1">
-                                <a class="btn btn-ghost text-xl">Read mail</a>
+                                <a class="btn btn-ghost text-xl" >Read mail</a>
                             </div>
                         </div>
 

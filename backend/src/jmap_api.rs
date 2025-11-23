@@ -1,3 +1,4 @@
+use crate::repo::Blob;
 use crate::util::network::NetworkAvailability;
 use anyhow::{Context, bail, format_err};
 use derive_more::Debug as DeriveDebug;
@@ -11,6 +12,7 @@ use jmap_client::core::response::{
     EmailChangesResponse, EmailGetResponse, MailboxChangesResponse, MailboxGetResponse,
     TaggedMethodResponse,
 };
+use jmap_client::email::Email;
 use jmap_client::{DataType, PushObject, email};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -389,5 +391,26 @@ impl JmapApi {
         .await?
         .unwrap_get_email()
         .context("Expecting email get response")
+    }
+
+    async fn wait_for_client(&self) -> Arc<Client> {
+        let mut receiver = self.client_state.clone();
+
+        loop {
+            if let ClientState::Connected(client) = &*receiver.borrow() {
+                return client.clone();
+            }
+
+            receiver.changed().await.ok();
+        }
+    }
+
+    #[instrument(skip(self), err, level = "debug")]
+    pub async fn download_blob(&self, blob_id: &str) -> anyhow::Result<Vec<u8>> {
+        self.wait_for_client()
+            .await
+            .download(blob_id)
+            .await
+            .context("Download blob failed")
     }
 }

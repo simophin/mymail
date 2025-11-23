@@ -31,7 +31,6 @@ CREATE TABLE emails(
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     id TEXT NOT NULL,
     jmap_data TEXT NOT NULL,
-    part_details TEXT,
     thread_id TEXT GENERATED ALWAYS AS (jmap_data->>'$.threadId') VIRTUAL,
     sent_at TEXT GENERATED ALWAYS AS (jmap_data->>'$.sentAt') VIRTUAL,
     received_at TEXT GENERATED ALWAYS AS (jmap_data->>'$.receivedAt') VIRTUAL,
@@ -48,14 +47,17 @@ CREATE INDEX idx_emails_account_thread ON emails(account_id, thread_id);
 
 CREATE TABLE blobs(
     account_id INTEGER NOT NULL,
-    email_id TEXT NOT NULL,
-    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    blob_id TEXT, -- The ID on the server
+    id TEXT NOT NULL, -- The ID on the server
     mime_type TEXT,
     name TEXT,
     data BLOB NOT NULL,
-    FOREIGN KEY (account_id, email_id) REFERENCES emails(account_id, id) ON DELETE CASCADE
-);
+    last_accessed DATETIME NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    PRIMARY KEY (account_id, id)
+) WITHOUT ROWID;
+
+CREATE INDEX idx_blobs_account_id ON blobs(account_id);
+CREATE INDEX idx_blobs_account_id_last_accessed ON blobs(account_id, last_accessed);
 
 CREATE TABLE mailbox_emails (
     account_id INTEGER NOT NULL,

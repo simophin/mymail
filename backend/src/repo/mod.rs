@@ -1,3 +1,4 @@
+mod blobs;
 mod emails;
 mod mailboxes;
 mod threads;
@@ -8,6 +9,8 @@ use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqliteQueryResult};
 use std::sync::Arc;
 use tokio::sync::broadcast;
+
+pub use blobs::Blob;
 
 pub use emails::EmailDbQuery;
 

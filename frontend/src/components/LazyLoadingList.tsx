@@ -21,6 +21,7 @@ export type Props<T> = {
     pages?: Signal<ImmutableList<Page<T>>>,
     deps?: any[],
     class?: string,
+    jumpToHeadTimestamp?: number,
 };
 
 export default function LazyLoadingList<T>(props: Props<T>) {
@@ -146,6 +147,12 @@ export default function LazyLoadingList<T>(props: Props<T>) {
 
         observer.observe(container);
         onCleanup(() => observer.unobserve(container));
+    });
+
+    createEffect(() => {
+        if (props.jumpToHeadTimestamp) {
+            container.scrollTo({ top: 0});
+        }
     });
 
     return container;

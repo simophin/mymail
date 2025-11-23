@@ -140,57 +140,6 @@ impl super::Repository {
         .await
         .context("Error querying emails")
     }
-
-    pub async fn get_email_parts(
-        &self,
-        account_id: AccountId,
-        email_id: &str,
-    ) -> anyhow::Result<Option<Email>> {
-        let row = sqlx::query!(
-            "SELECT part_details FROM emails WHERE account_id = ? AND id = ?",
-            account_id,
-            email_id
-        )
-        .fetch_optional(self.pool())
-        .await
-        .context("Error querying email details")?
-        .context("Email not found")?;
-
-        let Some(part_details) = &row.part_details else {
-            return Ok(None);
-        };
-
-        let email = serde_json::from_str::<Email>(&part_details)
-            .context("Error deserializing email details")?;
-
-        Ok(Some(email))
-    }
-
-    pub async fn update_email_details(
-        &self,
-        account_id: AccountId,
-        email_id: &str,
-        email: &Email,
-    ) -> anyhow::Result<()> {
-        let email_as_json =
-            serde_json::to_string(email).context("Error serializing email details")?;
-
-        let result = sqlx::query!(
-            "UPDATE emails SET part_details = ? WHERE account_id = ? AND id = ?",
-            email_as_json,
-            account_id,
-            email_id
-        )
-        .execute(self.pool())
-        .await
-        .context("Error updating email details")?;
-
-        if result.rows_affected() > 0 {
-            self.notify_changes(&["emails"]);
-        }
-
-        Ok(())
-    }
 }
 
 impl EmailSortColumn {
