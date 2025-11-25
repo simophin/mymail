@@ -9,6 +9,7 @@ import PaperClipIcon from "heroicons/24/outline/paper-clip.svg";
 import { log as parentLog } from "../log";
 import EmailIcon from "./EmailIcon";
 import { formatRelative } from "date-fns";
+import {formatShortDateTime} from "../formats";
 
 const log = parentLog.child({ "component": "ThreadList" });
 
@@ -184,8 +185,7 @@ export default function ThreadList(props: {
 
 function formatThreadTime(thread: Thread) {
     const firstMail = thread.emails[0];
-    const date = new Date(firstMail.receivedAt);
-    return formatRelative(date, new Date());
+    return formatShortDateTime(new Date(firstMail.receivedAt));
 }
 
 function ThreadPreview(props: { thread: Thread }) {
