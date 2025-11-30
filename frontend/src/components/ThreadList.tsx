@@ -150,7 +150,7 @@ export default function ThreadList(props: {
     return <LazyLoadingList
         numPerPage={numPerPage}
         watchPage={watchPage}
-        class={`${props.class} list w-full h-full overflow-y-scroll`}
+        class={`${props.class} list w-full h-full overflow-y-scroll overflow-x-auto`}
         pages={pages}
         deps={[props.query.accountId, props.query.mailboxId]}
         jumpToHeadTimestamp={props.jumpToHeadTimestamp}

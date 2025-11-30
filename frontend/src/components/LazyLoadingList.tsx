@@ -128,7 +128,7 @@ export default function LazyLoadingList<T>(props: Props<T>) {
     });
 
     const container = <ul {...containerProps}
-                           onScroll={(d) => handleContainerEvent(d.currentTarget as HTMLElement)}>
+                          onScroll={(d) => handleContainerEvent(d.currentTarget as HTMLElement)}>
         <For each={pages().toArray()}>
             {(page) => (
                 <For each={page ?? Array(localProps.numPerPage).fill(null)}>

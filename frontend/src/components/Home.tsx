@@ -12,6 +12,7 @@ import {Page} from "./LazyLoadingList";
 import ThreadDetails from "./ThreadDetails";
 import {AdjustableHorizontalDivider} from "./AdjustableDivider";
 import {isMedium} from "../media";
+import {createPreference} from "../preferences";
 
 const apiUrl: string = import.meta.env.VITE_BASE_URL;
 
@@ -61,9 +62,9 @@ export default function Home() {
 
     const [jumpToThreadListHeadTimestamp, setJumpToThreadListHeadTimestamp] = createSignal<number>();
 
-    const [mailboxListWidth, setMailboxListWidth] = createSignal<number>(240);
+    const [mailboxListWidth, setMailboxListWidth] = createPreference<number>("mailbox-list-width", zod.number(), 240);
 
-    const [threadListWidth, setThreadListWidth] = createSignal<number>(300);
+    const [threadListWidth, setThreadListWidth] = createPreference<number>("thread-list-width", zod.number(), 300);
     const [threadListDragging, setThreadListDragging] = createSignal<boolean>(false);
 
     return (
