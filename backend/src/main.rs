@@ -55,6 +55,7 @@ async fn main() {
     let api_state = ApiState {
         repo: repo.clone(),
         account_states: Default::default(),
+        http_client: reqwest::Client::new(),
     };
 
     let axum_app = api::build_api_router()
