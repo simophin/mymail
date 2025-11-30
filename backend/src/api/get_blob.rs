@@ -81,6 +81,14 @@ pub async fn get_blob(
                 .unwrap_or("application/octet-stream"),
         )
         .header(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
+        )
+        .header(
+            header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+            HeaderValue::from_static("true"),
+        )
+        .header(
             header::CACHE_CONTROL,
             HeaderValue::from_static("public, max-age=31536000, immutable"),
         )

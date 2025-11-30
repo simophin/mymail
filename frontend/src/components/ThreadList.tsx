@@ -32,6 +32,7 @@ const BodyPartSchema = zod.object({
     blobId: zod.string(),
     type: zod.string(),
     size: zod.number(),
+    cid: zod.string().nullish(),
 });
 
 const EmailAddressSchema = zod.object({
@@ -46,6 +47,7 @@ const EmailSchema = zod.object({
     preview: zod.string().optional(),
     htmlBody: zod.array(BodyPartSchema),
     textBody: zod.array(BodyPartSchema),
+    attachments: zod.array(BodyPartSchema).optional(),
     hasAttachment: zod.boolean(),
     from: zod.array(EmailAddressSchema),
 });
@@ -57,6 +59,7 @@ const ThreadSchema = zod.object({
 
 export type Email = zod.infer<typeof EmailSchema>;
 export type Thread = zod.infer<typeof ThreadSchema>;
+export type BodyPart = zod.infer<typeof BodyPartSchema>;
 
 type EmailQuery = {
     anchor_id?: string,
