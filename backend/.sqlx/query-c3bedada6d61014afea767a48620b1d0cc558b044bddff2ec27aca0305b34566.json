@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE external_cache SET last_accessed = CURRENT_TIMESTAMP WHERE account_id = ? AND url = ? RETURNING value AS data, mime_type",
+  "describe": {
+    "columns": [
+      {
+        "name": "data",
+        "ordinal": 0,
+        "type_info": "Blob"
+      },
+      {
+        "name": "mime_type",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c3bedada6d61014afea767a48620b1d0cc558b044bddff2ec27aca0305b34566"
+}

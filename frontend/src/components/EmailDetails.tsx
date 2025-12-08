@@ -11,8 +11,8 @@ export default function EmailDetails(props: {
     accountId: AccountId,
     email: Email,
 }) {
-    const getPartUrl = (search: (part: BodyPart) => boolean) => {
-        const part = props.email.htmlBody.find(search) || props.email.textBody.find(search);
+    const getPartUrl = (parts: BodyPart[], search: (part: BodyPart) => boolean) => {
+        const part = parts.find(search);
         if (part) {
             const mimeType = (!part.type.startsWith("text/") || part.type.includes("charset")) ? part.type : `${part.type}; charset=utf-8`;
             return `${apiUrl}/blobs/${props.accountId}/${part.blobId}?mimeType=${encodeURIComponent(mimeType)}`;
@@ -26,9 +26,8 @@ export default function EmailDetails(props: {
         document.querySelectorAll(selector).forEach((element) => {
             const link = element.getAttribute(attribute);
             if (link && link.startsWith("cid:")) {
-                log.info({"link": link}, 'Replacing cid link');
                 const cid = link.substring(4);
-                const realLink = getPartUrl((part) => part.cid === cid);
+                const realLink = getPartUrl(props.email.attachments ?? [], (part) => part.cid === cid);
                 if (realLink) {
                     element.setAttribute(attribute, realLink);
                 } else {
@@ -40,25 +39,35 @@ export default function EmailDetails(props: {
 
 
     const mainHtmlBodyUrl = createMemo(() => {
-        return getPartUrl((part) => part.type.startsWith("text/html"));
+        return getPartUrl(props.email.htmlBody, (part) => part.type.startsWith("text/html"));
     });
 
     const mainTextBodyUrl = createMemo(() => {
-        return getPartUrl((part) => part.type.startsWith("text/plain"));
+        return getPartUrl(props.email.textBody, (part) => part.type.startsWith("text/plain"));
     });
 
     const onPageLoaded = (event: Event) => {
         const iframe = event.target as HTMLIFrameElement;
-        console.log(iframe);
-        replaceCidLink(iframe.contentDocument!, 'img', 'src');
-        replaceCidLink(iframe.contentDocument!, 'link', 'href');
 
-        iframe.contentDocument!.querySelectorAll('a').forEach((link) => {
+        iframe.contentDocument?.querySelectorAll('img').forEach(img => {
+            const src = img.src;
+            if (src && src.startsWith('cid:')) {
+                const cid = src.substring(4);
+                const realLink = getPartUrl(props.email.attachments ?? [], (part) => part.cid === cid);
+                if (realLink) {
+                    img.src = realLink;
+                } else {
+                    img.removeAttribute('src');
+                }
+            } else if (src) {
+                img.src = `${apiUrl}/proxy-image?url=${encodeURIComponent(src)}`;
+            }
+        });
+
+        iframe.contentDocument?.querySelectorAll('a').forEach((link) => {
             link.target = "_blank";
         });
     };
-
-    log.debug({email: props.email}, 'Rendering')
 
     return <>
         <Switch fallback={"No text available"}>
@@ -66,7 +75,7 @@ export default function EmailDetails(props: {
                 <iframe class="w-full h-full overflow-scroll"
                         src={mainHtmlBodyUrl()}
                         onload={onPageLoaded}
-                        sandbox="allow-popups"/>
+                        sandbox="allow-popups allow-same-origin"/>
             </Match>
 
             <Match when={!!mainTextBodyUrl()}>

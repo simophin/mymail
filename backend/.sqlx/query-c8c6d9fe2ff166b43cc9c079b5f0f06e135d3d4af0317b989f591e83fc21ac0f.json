@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO external_cache (account_id, url, value, mime_type, last_accessed)\n             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "c8c6d9fe2ff166b43cc9c079b5f0f06e135d3d4af0317b989f591e83fc21ac0f"
+}

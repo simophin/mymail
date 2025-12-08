@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 mod get_blob;
+mod proxy;
 mod static_file;
 mod stream;
 mod sync_mail;
