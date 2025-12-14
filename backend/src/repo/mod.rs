@@ -1,6 +1,5 @@
 mod blobs;
 mod emails;
-mod external_cache;
 mod mailboxes;
 mod threads;
 

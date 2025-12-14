@@ -49,6 +49,7 @@ pub fn build_api_router() -> axum::Router<ApiState> {
             get(watch_mailboxes::watch_mailboxes),
         )
         .route("/threads/{account_id}", get(watch_threads::watch_threads))
+        .route("/proxy", get(proxy::proxy))
         .route("/", any(static_file::static_file_or_dev_proxy))
         .route("/{*path}", any(static_file::static_file_or_dev_proxy))
 }

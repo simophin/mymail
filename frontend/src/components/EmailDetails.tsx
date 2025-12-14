@@ -1,5 +1,5 @@
 import {AccountId, BodyPart, Email} from "./ThreadList";
-import {createMemo, createResource, createSignal, Match, Show, Switch} from "solid-js";
+import {createEffect, createMemo, createResource, createSignal, Match, Show, Switch} from "solid-js";
 import * as zod from "zod";
 import {log as parentLog} from "../log";
 
@@ -10,7 +10,29 @@ const log = parentLog.child({ "component": "EmailDetails" });
 export default function EmailDetails(props: {
     accountId: AccountId,
     email: Email,
+    defaultAllowRemoteContent?: boolean
 }) {
+    const [allowRemoteContent, setAllowRemoteContent] = createSignal(props.defaultAllowRemoteContent == true);
+    const [loadedIframe, setLoadedIframe] = createSignal<HTMLIFrameElement | null>(null);
+
+    createEffect(() => {
+        const iframe = loadedIframe();
+        iframe?.contentDocument?.querySelectorAll('img').forEach(img => {
+            const src = img.src;
+            if (src && src.startsWith('cid:')) {
+                const cid = src.substring(4);
+                const realLink = getPartUrl(props.email.attachments ?? [], (part) => part.cid === cid);
+                if (realLink) {
+                    img.src = realLink;
+                } else {
+                    img.removeAttribute('src');
+                }
+            } else if (src) {
+                img.src = `${apiUrl}/proxy?url=${encodeURIComponent(src)}`;
+            }
+        });
+    })
+
     const getPartUrl = (parts: BodyPart[], search: (part: BodyPart) => boolean) => {
         const part = parts.find(search);
         if (part) {
@@ -18,25 +40,6 @@ export default function EmailDetails(props: {
             return `${apiUrl}/blobs/${props.accountId}/${part.blobId}?mimeType=${encodeURIComponent(mimeType)}`;
         }
     };
-
-    function replaceCidLink<K extends keyof HTMLElementTagNameMap>(
-        document: HTMLDocument,
-        selector: K,
-        attribute: string) {
-        document.querySelectorAll(selector).forEach((element) => {
-            const link = element.getAttribute(attribute);
-            if (link && link.startsWith("cid:")) {
-                const cid = link.substring(4);
-                const realLink = getPartUrl(props.email.attachments ?? [], (part) => part.cid === cid);
-                if (realLink) {
-                    element.setAttribute(attribute, realLink);
-                } else {
-                    element.removeAttribute(attribute);
-                }
-            }
-        });
-    }
-
 
     const mainHtmlBodyUrl = createMemo(() => {
         return getPartUrl(props.email.htmlBody, (part) => part.type.startsWith("text/html"));
@@ -48,21 +51,7 @@ export default function EmailDetails(props: {
 
     const onPageLoaded = (event: Event) => {
         const iframe = event.target as HTMLIFrameElement;
-
-        iframe.contentDocument?.querySelectorAll('img').forEach(img => {
-            const src = img.src;
-            if (src && src.startsWith('cid:')) {
-                const cid = src.substring(4);
-                const realLink = getPartUrl(props.email.attachments ?? [], (part) => part.cid === cid);
-                if (realLink) {
-                    img.src = realLink;
-                } else {
-                    img.removeAttribute('src');
-                }
-            } else if (src) {
-                img.src = `${apiUrl}/proxy-image?url=${encodeURIComponent(src)}`;
-            }
-        });
+        setLoadedIframe(iframe);
 
         iframe.contentDocument?.querySelectorAll('a').forEach((link) => {
             link.target = "_blank";
