@@ -70,7 +70,7 @@ export default function Home() {
     return (
         <div class="drawer md:drawer-open overflow-hidden w-screen h-screen">
             {drawerToggle}
-            <div class="drawer-side flex">
+            <div class="drawer-side md:flex">
                 <label for="my-drawer" class="drawer-overlay" aria-label="close sidebar"/>
                 <MailboxList
                     selectedMailboxId={selectedMailbox()?.id}
@@ -94,7 +94,7 @@ export default function Home() {
                 <Show when={!!selectedMailbox()} fallback={"Select a mailbox"}>
                     <div
                         style={{width: isMedium() ? `${threadListWidth()}px` : '100%'}}
-                        class="h-full absolute md:static overflow-hidden flex flex-col">
+                        class={`h-full absolute md:static md:visible top-0 overflow-hidden flex flex-col ${selectedThread() ? 'invisible' : ''}`}>
                         <div class="flex-none navbar bg-base-100 shadow-sm md:hidden">
                             <label for="my-drawer" class="flex-none btn btn-ghost">
                                 <HamburgerIcon class="size-4"/>
@@ -126,7 +126,7 @@ export default function Home() {
 
                 <Show when={!!selectedThread()}>
                     <div
-                        class="h-full w-full md:flex-1 md:w-0 absolute md:static overflow-hidden flex flex-col bg-base-100">
+                        class="h-full w-full md:flex-1 md:w-0 absolute md:static overflow-hidden flex flex-col bg-base-100 top-0">
                         <div class="flex-none navbar bg-base-100 shadow-sm md:hidden">
                             <button class="flex-none btn btn-ghost" onClick={() => navigator(-1)}>
                                 <ArrowLeftIcon class="size-4 "/>

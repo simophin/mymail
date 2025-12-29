@@ -51,9 +51,7 @@ pub async fn static_file_or_dev_proxy(
             });
 
         resp_builder
-            .body(Body::from(
-                resp.bytes().await.context("Reading upstream body failed")?,
-            ))
+            .body(Body::from_stream(resp.bytes_stream()))
             .context("Building response from dev server failed")
     }
     .await

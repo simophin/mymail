@@ -170,15 +170,19 @@ export default function ThreadList(props: {
                     size="lg" />
 
                 <div class="flex-1">
+                    <div class="flex">
+                        <span class="flex-1">
+                            {thread!.emails?.at(0)?.from[0].name ?? thread!.emails?.at(0)?.from[0].email}
+                        </span>
+
+                        <span class="ml-2 text-sm text-gray-500">{formatThreadTime(thread!)}</span>
+
+                    </div>
                     <h4 class="flex items-center mb-1">
                         {containsAttachment(thread!) &&
                             <PaperClipIcon class="size-4 inline-block mr-1 align-text-bottom" />}
                         <span class="text-lg flex-1 overflow-x-hidden line-clamp-1 text-ellipsis">{thread?.emails?.at(0)?.subject}</span>
-                        <span class="ml-2 text-sm text-gray-500">{formatThreadTime(thread!)}</span>
                     </h4>
-                    <div class="line-clamp-2 text-sm">
-                        <ThreadPreview thread={thread!} />
-                    </div>
                 </div>
 
             </li>
@@ -191,19 +195,6 @@ function formatThreadTime(thread: Thread) {
     return formatShortDateTime(new Date(firstMail.receivedAt));
 }
 
-function ThreadPreview(props: { thread: Thread }) {
-    const firstMail = () => props.thread.emails[0];
-
-    const sender = () => {
-        const senderName = firstMail().from[0].name ?? firstMail().from[0].email;
-        return senderName && <b>{senderName}:&nbsp;</b>;
-    }
-
-    return <>
-        {sender()}
-        {firstMail().subject}
-    </>
-}
 
 function last<T>(arr: T[] | undefined): T | undefined {
     if (!arr || arr.length === 0) {

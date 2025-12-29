@@ -3,6 +3,7 @@ use crate::jmap_api::JmapApi;
 use crate::repo::Repository;
 use crate::sync::SyncCommand;
 use axum::routing::{any, get, post};
+use axum_reverse_proxy::ReverseProxy;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -36,6 +37,8 @@ pub struct ApiState {
 pub fn build_api_router() -> axum::Router<ApiState> {
     use axum::Router;
 
+    let dev_server = ReverseProxy::new("/", "http://localhost:3000");
+
     Router::new()
         .route("/mails/{account_id}", post(watch_mail::watch_mail))
         .route("/blobs/{account_id}/{b lob_id}", get(get_blob::get_blob))
@@ -50,6 +53,5 @@ pub fn build_api_router() -> axum::Router<ApiState> {
         )
         .route("/threads/{account_id}", get(watch_threads::watch_threads))
         .route("/proxy", get(proxy::proxy))
-        .route("/", any(static_file::static_file_or_dev_proxy))
-        .route("/{*path}", any(static_file::static_file_or_dev_proxy))
+        .merge(dev_server)
 }
