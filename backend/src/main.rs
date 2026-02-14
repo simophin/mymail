@@ -17,7 +17,6 @@ mod util;
 async fn main() {
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt::init();
-
     let database_file = std::env::var("DATABASE_FILE").unwrap_or(String::from(":memory:"));
 
     tracing::info!("Using database {database_file}");

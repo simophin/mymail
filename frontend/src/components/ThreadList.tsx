@@ -9,7 +9,7 @@ import PaperClipIcon from "heroicons/24/outline/paper-clip.svg";
 import { log as parentLog } from "../log";
 import EmailIcon from "./EmailIcon";
 import { formatRelative } from "date-fns";
-import {formatShortDateTime} from "../formats";
+import { formatShortDateTime } from "../formats";
 
 const log = parentLog.child({ "component": "ThreadList" });
 
@@ -181,7 +181,7 @@ export default function ThreadList(props: {
                     <h4 class="flex items-center mb-1">
                         {containsAttachment(thread!) &&
                             <PaperClipIcon class="size-4 inline-block mr-1 align-text-bottom" />}
-                        <span class="text-lg flex-1 overflow-x-hidden line-clamp-1 text-ellipsis">{thread?.emails?.at(0)?.subject}</span>
+                        <span class="text-md flex-1 overflow-x-hidden line-clamp-1 text-ellipsis">{thread?.emails?.at(0)?.subject}</span>
                     </h4>
                 </div>
 
