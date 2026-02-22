@@ -18,6 +18,9 @@ pub struct Params {
 
     #[serde(default, rename = "blockImages")]
     pub block_images: bool,
+
+    #[serde(default, rename = "sanitizeHtml")]
+    pub sanitize_html: bool,
 }
 
 #[instrument(skip(state))]
@@ -28,6 +31,7 @@ pub async fn get_blob(
         name,
         mime_type,
         block_images,
+        sanitize_html,
     }): extract::Query<Params>,
 ) -> HttpResult<Response> {
     let blob = match state
@@ -91,8 +95,7 @@ pub async fn get_blob(
         .header(
             header::CACHE_CONTROL,
             HeaderValue::from_static("public, max-age=31536000, immutable"),
-        )
-        .header(header::CONTENT_LENGTH, blob.data.len().to_string());
+        );
 
     if let Some(name) = &blob.name {
         response = response.header(
@@ -105,8 +108,18 @@ pub async fn get_blob(
         response = response.header(header::CONTENT_SECURITY_POLICY, "img-src 'none';");
     }
 
+    let body = if sanitize_html {
+        Body::from(crate::util::html_sanitizer::sanitize_html(
+            std::str::from_utf8(&blob.data)
+                .context("Error converting blob data to string for sanitization")
+                .into_internal_error_result()?,
+        ))
+    } else {
+        Body::from(blob.data)
+    };
+
     response
-        .body(Body::from(blob.data))
+        .body(body)
         .context("Error creating response from body")
         .into_internal_error_result()
 }

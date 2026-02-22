@@ -42,7 +42,7 @@ export default function EmailDetails(props: {
     };
 
     const mainHtmlBodyUrl = createMemo(() => {
-        return getPartUrl(props.email.htmlBody, (part) => part.type.startsWith("text/html"));
+        return getPartUrl(props.email.htmlBody, (part) => part.type.startsWith("text/html")) + '&sanitizeHtml=true';
     });
 
     const mainTextBodyUrl = createMemo(() => {
