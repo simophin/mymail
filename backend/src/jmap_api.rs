@@ -1,4 +1,3 @@
-use crate::repo::Blob;
 use crate::util::network::NetworkAvailability;
 use anyhow::{Context, bail, format_err};
 use derive_more::Debug as DeriveDebug;
@@ -12,7 +11,7 @@ use jmap_client::core::response::{
     EmailChangesResponse, EmailGetResponse, MailboxChangesResponse, MailboxGetResponse,
     TaggedMethodResponse,
 };
-use jmap_client::email::Email;
+use jmap_client::identity::Identity;
 use jmap_client::{DataType, PushObject, email};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -44,6 +43,35 @@ pub struct EmailQuery {
     pub search_keyword: Option<String>,
     pub sorts: Vec<EmailSort>,
     pub limit: Option<NonZeroUsize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailAddressInput {
+    pub name: Option<String>,
+    pub email: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentInput {
+    pub blob_id: String,
+    pub name: Option<String>,
+    pub mime_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailDraft {
+    pub identity_id: String,
+    pub mailbox_id: String,
+    pub from: Vec<EmailAddressInput>,
+    pub to: Vec<EmailAddressInput>,
+    pub cc: Vec<EmailAddressInput>,
+    pub bcc: Vec<EmailAddressInput>,
+    pub subject: String,
+    pub text_body: Option<String>,
+    pub html_body: Option<String>,
+    pub in_reply_to: Vec<String>,
+    pub references: Vec<String>,
+    pub attachments: Vec<AttachmentInput>,
 }
 
 type JmapRequestBuilder = Box<dyn FnOnce(&mut Request<'_>) + Send + Sync>;
@@ -412,5 +440,206 @@ impl JmapApi {
             .download(blob_id)
             .await
             .context("Download blob failed")
+    }
+
+    #[instrument(skip(self), ret, level = "debug")]
+    pub async fn get_identities(&self) -> anyhow::Result<Vec<Identity>> {
+        self.send_ws_request(|r| {
+            r.get_identity();
+        })
+        .await?
+        .unwrap_get_identity()
+        .context("Expecting identity get response")
+        .map(|mut r| r.take_list())
+    }
+
+    #[instrument(skip(self, draft), ret, level = "debug")]
+    pub async fn create_email(&self, draft: EmailDraft) -> anyhow::Result<String> {
+        self.create_email_inner(draft, false).await
+    }
+
+    /// Creates the email on the JMAP server with the `$draft` keyword set, placing it
+    /// in the mailbox specified by `draft.mailbox_id` (should be the Drafts mailbox).
+    #[instrument(skip(self, draft), ret, level = "debug")]
+    pub async fn create_jmap_draft(&self, draft: EmailDraft) -> anyhow::Result<String> {
+        self.create_email_inner(draft, true).await
+    }
+
+    async fn create_email_inner(&self, draft: EmailDraft, is_draft: bool) -> anyhow::Result<String> {
+        use jmap_client::email::EmailBodyPart;
+
+        self.send_ws_request(move |r| {
+            let email = r.set_email().create();
+
+            email.mailbox_ids([draft.mailbox_id]);
+
+            if is_draft {
+                email.keywords(["$draft"]);
+            }
+
+            if !draft.from.is_empty() {
+                email.from(draft.from.iter().map(email_addr_to_jmap));
+            }
+            if !draft.to.is_empty() {
+                email.to(draft.to.iter().map(email_addr_to_jmap));
+            }
+            if !draft.cc.is_empty() {
+                email.cc(draft.cc.iter().map(email_addr_to_jmap));
+            }
+            if !draft.bcc.is_empty() {
+                email.bcc(draft.bcc.iter().map(email_addr_to_jmap));
+            }
+            if !draft.in_reply_to.is_empty() {
+                email.in_reply_to(draft.in_reply_to);
+            }
+            if !draft.references.is_empty() {
+                email.references(draft.references);
+            }
+            email.subject(draft.subject);
+
+            match (draft.text_body, draft.html_body) {
+                (Some(text), Some(html)) => {
+                    email.body_value("text".to_string(), text.as_str());
+                    email.body_value("html".to_string(), html.as_str());
+                    email.text_body(
+                        EmailBodyPart::new()
+                            .part_id("text")
+                            .content_type("text/plain"),
+                    );
+                    email.html_body(
+                        EmailBodyPart::new()
+                            .part_id("html")
+                            .content_type("text/html"),
+                    );
+                }
+                (Some(text), None) => {
+                    email.body_value("text".to_string(), text.as_str());
+                    email.text_body(
+                        EmailBodyPart::new()
+                            .part_id("text")
+                            .content_type("text/plain"),
+                    );
+                }
+                (None, Some(html)) => {
+                    email.body_value("html".to_string(), html.as_str());
+                    email.html_body(
+                        EmailBodyPart::new()
+                            .part_id("html")
+                            .content_type("text/html"),
+                    );
+                }
+                (None, None) => {
+                    email.body_value("text".to_string(), "");
+                    email.text_body(
+                        EmailBodyPart::new()
+                            .part_id("text")
+                            .content_type("text/plain"),
+                    );
+                }
+            }
+
+            for att in draft.attachments {
+                let mut part = EmailBodyPart::new().blob_id(att.blob_id);
+                if let Some(name) = att.name {
+                    part = part.name(name);
+                }
+                if let Some(mime) = att.mime_type {
+                    part = part.content_type(mime);
+                }
+                email.attachment(part);
+            }
+        })
+        .await?
+        .unwrap_set_email()
+        .context("Expecting email set response")
+        .and_then(|mut resp| {
+            let create_id = resp
+                .created_ids()
+                .context("Email set returned no created entries")?
+                .next()
+                .map(|s| s.clone())
+                .context("Email set created map is empty")?;
+            resp.created(&create_id)
+                .context("Email set created entry not found")
+                .and_then(|email| {
+                    email
+                        .id()
+                        .map(|s| s.to_string())
+                        .context("Created email has no ID")
+                })
+        })
+    }
+
+    /// Destroys an email on the JMAP server. Used to clean up superseded draft emails.
+    #[instrument(skip(self), ret, level = "debug")]
+    pub async fn delete_jmap_email(&self, jmap_email_id: String) -> anyhow::Result<()> {
+        self.send_ws_request(move |r| {
+            r.set_email().destroy([jmap_email_id]);
+        })
+        .await?
+        .unwrap_set_email()
+        .context("Expecting email set response")
+        .and_then(|resp| {
+            let destroyed_ids: Vec<String> = resp
+                .destroyed_ids()
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect();
+            destroyed_ids
+                .first()
+                .context("Email destroy returned no destroyed IDs")
+                .map(|_| ())
+        })
+    }
+
+    #[instrument(skip(self), ret, level = "debug")]
+    pub async fn submit_email(
+        &self,
+        email_id: String,
+        identity_id: String,
+    ) -> anyhow::Result<()> {
+        self.send_ws_request(move |r| {
+            r.set_email_submission()
+                .create()
+                .email_id(email_id)
+                .identity_id(identity_id);
+        })
+        .await?
+        .unwrap_set_email_submission()
+        .context("Expecting email submission set response")
+        .and_then(|mut resp| {
+            let create_id = resp
+                .created_ids()
+                .context("Email submission set returned no created entries")?
+                .next()
+                .map(|s| s.clone())
+                .context("Email submission created map is empty")?;
+            resp.created(&create_id)
+                .context("Email submission created entry not found")
+        })?;
+        Ok(())
+    }
+
+    #[instrument(skip(self, data), level = "debug")]
+    pub async fn upload_blob(
+        &self,
+        data: Vec<u8>,
+        content_type: Option<String>,
+    ) -> anyhow::Result<String> {
+        self.wait_for_client()
+            .await
+            .upload(None, data, content_type.as_deref())
+            .await
+            .context("Blob upload failed")
+            .map(|mut r| r.take_blob_id())
+    }
+}
+
+fn email_addr_to_jmap(addr: &EmailAddressInput) -> jmap_client::email::EmailAddress {
+    if let Some(name) = &addr.name {
+        (name.clone(), addr.email.clone()).into()
+    } else {
+        addr.email.clone().into()
     }
 }

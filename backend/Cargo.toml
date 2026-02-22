@@ -34,3 +34,4 @@ reqwest = { version = "0", features = ["stream"] }
 http-body-util = "0"
 axum-reverse-proxy = { version = "1", default-features = false }
 ammonia = "4"
+uuid = { version = "1", features = ["v4"] }

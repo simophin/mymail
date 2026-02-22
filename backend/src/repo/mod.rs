@@ -1,4 +1,5 @@
 mod blobs;
+mod drafts;
 mod emails;
 mod mailboxes;
 mod threads;
@@ -11,7 +12,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 pub use blobs::Blob;
-
+pub use drafts::{DraftRecord, DraftRepositoryExt};
 pub use emails::EmailDbQuery;
 
 #[derive(Clone)]
